@@ -1432,6 +1432,8 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
   const [showThemes,setShowThemes]=useState(false);
   const [showEditStart,setShowEditStart]=useState(false);
   const [startDate,setStartDate]=useState(s.enroll_date||"");
+  const [weakSearch,setWeakSearch]=useState("");
+  const [showWeakDD,setShowWeakDD]=useState(false);
   const t=getT(s.theme_id);
   const sessions=getSessions(classDays,attM);
   const present=sessions.filter(item=>(s.attendance||{})[item.date]).length;
@@ -1453,18 +1455,6 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
     }catch(e){console.error("Sync err",e);}
   },[s.id,setStudents]);
 
-  const doPrint=()=>{
-    const el=printRef.current;
-    if(!el)return;
-    const w=window.open("","_blank");
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${s.name}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:${t.bg};font-family:system-ui;padding:14px;max-width:600px;margin:0 auto}@media print{body{-webkit-print-color-adjust:exact}}</style></head><body>${el.innerHTML}</body></html>`);
-    w.document.close();
-    setTimeout(()=>{w.focus();w.print();},300);
-  };
-
-  const [weakSearch,setWeakSearch]=useState("");
-  const [showWeakDD,setShowWeakDD]=useState(false);
-
   return(
     <div style={{minHeight:"100vh",background:t.bg,fontFamily:"system-ui",maxWidth:480,margin:"0 auto",padding:14,overflowX:"hidden",boxSizing:"border-box"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
@@ -1472,11 +1462,14 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
         <div style={{flex:1,fontWeight:700,fontSize:15,color:t.text,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
         <button onClick={()=>setShowThemes(true)} style={bs(t.soft,t.accent,t.border,true)}>🎨</button>
         <button onClick={()=>setShowChangePw(true)} style={bs(t.soft,t.accent,t.border,true)}>🔐</button>
-        <button onClick={doPrint} style={bs(t.accent,"#fff",undefined,true)}>🖨️</button>
+        <button onClick={()=>{
+          const el=printRef.current;if(!el)return;
+          const w=window.open("","_blank");
+          w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${s.name}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{background:${t.bg};font-family:system-ui;padding:14px;max-width:600px;margin:0 auto}@media print{body{-webkit-print-color-adjust:exact}}</style></head><body>${el.innerHTML}</body></html>`);
+          w.document.close();setTimeout(()=>{w.focus();w.print();},300);
+        }} style={bs(t.accent,"#fff",undefined,true)}>🖨️</button>
       </div>
       {showChangePw&&<ChangePasswordModal onClose={()=>setShowChangePw(false)} studentId={s.id}/>}
-
-      {/* Theme selector modal */}
       {showThemes&&(
         <Overlay onClose={()=>setShowThemes(false)} maxW={360}>
           <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>🎨 Өөрийн theme сонгох</div>
@@ -1491,22 +1484,13 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
           </div>
         </Overlay>
       )}
-
-      {/* Photo upload for student */}
       <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",background:t.soft,borderRadius:12,padding:"8px 12px"}}>
         <div style={{position:"relative",flexShrink:0}}>
           <div style={{width:50,height:50,borderRadius:"50%",overflow:"hidden",border:`2px solid ${t.accent}`,background:t.card,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>
             {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t.emoji}
           </div>
           <label style={{position:"absolute",bottom:-2,right:-2,width:18,height:18,borderRadius:"50%",background:t.accent,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:9,color:"#fff"}}>
-            📷
-            <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
-              const file=e.target.files&&e.target.files[0];
-              if(!file)return;
-              const reader=new FileReader();
-              reader.onload=ev=>upd({photo_url:ev.target.result});
-              reader.readAsDataURL(file);
-            }}/>
+            📷<input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{const file=e.target.files&&e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=ev=>upd({photo_url:ev.target.result});reader.readAsDataURL(file);}}/>
           </label>
         </div>
         <div style={{flex:1}}>
@@ -1516,10 +1500,8 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
             <span onClick={()=>setShowEditStart(true)} style={{cursor:"pointer",fontSize:9,opacity:.6}}>✏️</span>
           </div>
         </div>
-        {s.photo_url&&<span onClick={()=>upd({photo_url:null})} style={{fontSize:10,color:"#e53935",cursor:"pointer"}}>✕ Зураг</span>}
+        {s.photo_url&&<span onClick={()=>upd({photo_url:null})} style={{fontSize:10,color:"#e53935",cursor:"pointer"}}>✕</span>}
       </div>
-
-      {/* Edit start date modal */}
       {showEditStart&&(
         <Overlay onClose={()=>setShowEditStart(false)} maxW={300}>
           <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>📅 Эхлэх огноо засах</div>
@@ -1531,69 +1513,32 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
         </Overlay>
       )}
       <div style={{display:"flex",gap:6,marginBottom:14,background:t.soft,borderRadius:12,padding:4}}>
-        {[["card","📋 Карт"],["vocab","📚 Үгс"],["weak","⚠️ Эргэлзэж буй"],["leaderboard","🏆 Жагсаалт"]].map(item=>(
+        {[["card","📋 Карт"],["vocab","📚 Үгс"],["weak","⚠️ Эргэлзэж"],["leaderboard","🏆 Жагсаалт"]].map(item=>(
           <button key={item[0]} onClick={()=>setTab(item[0])} style={{flex:1,padding:"8px 2px",borderRadius:9,border:"none",background:tab===item[0]?t.card:"transparent",color:tab===item[0]?t.accent:t.text,fontWeight:tab===item[0]?700:400,fontSize:10,cursor:"pointer"}}>{item[1]}</button>
         ))}
       </div>
-      {tab==="leaderboard"&&(
-        <div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}>
-          <div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div>
-          <Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/>
-        </div>
-      )}
-
+      {tab==="leaderboard"&&<div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}><div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div><Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/></div>}
+      {tab==="vocab"&&<VocabTab vocabEntries={vocabEntries} t={t}/>}
       {tab==="weak"&&(
         <div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}>
-          <div style={{fontWeight:700,fontSize:14,color:t.text,marginBottom:12}}>⚠️ Эргэлзэж буй үгс & дүрэм</div>
-          {(s.weak_words||[]).length===0?(
-            <div style={{textAlign:"center",padding:"20px 0",color:"#aaa",fontSize:13}}>🎉 Эргэлзэж буй үг байхгүй!</div>
-          ):(
+          <div style={{fontWeight:700,fontSize:14,color:t.text,marginBottom:12}}>⚠️ Эргэлзэж буй үгс</div>
+          {(s.weak_words||[]).length===0?<div style={{textAlign:"center",padding:"20px 0",color:"#aaa"}}>🎉 Эргэлзэж буй үг байхгүй!</div>:(
             <div>
-              {(s.weak_words||[]).filter(w=>w.wtype!=="grammar").length>0&&(
-                <div style={{marginBottom:14}}>
-                  <div style={{fontSize:11,fontWeight:700,color:"#e65100",marginBottom:7}}>📚 Эргэлзэж буй үгс</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                    {(s.weak_words||[]).filter(w=>w.wtype!=="grammar").map((w,i)=>(
-                      <div key={i} style={{background:"#fff8f0",border:"1px solid #ffcc80",borderRadius:9,padding:"7px 10px"}}>
-                        <div style={{fontWeight:700,fontSize:13,color:"#e65100"}}>{w.word}</div>
-                        <div style={{fontSize:11,color:"#888"}}>{w.meaning}</div>
-                        <div style={{fontSize:9,color:"#bbb",marginTop:2}}>✕{w.miss} удаа</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {(s.weak_words||[]).filter(w=>w.wtype==="grammar").length>0&&(
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",marginBottom:7}}>📖 Эргэлзэж буй дүрэм</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-                    {(s.weak_words||[]).filter(w=>w.wtype==="grammar").map((w,i)=>(
-                      <div key={i} style={{background:"#f5f0ff",border:"1px solid #c5b8ff",borderRadius:9,padding:"7px 10px"}}>
-                        <div style={{fontWeight:700,fontSize:13,color:"#7c3aed"}}>{w.word}</div>
-                        <div style={{fontSize:11,color:"#888"}}>{w.meaning}</div>
-                        <div style={{fontSize:9,color:"#bbb",marginTop:2}}>✕{w.miss} удаа</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {(s.weak_words||[]).filter(w=>w.wtype!=="grammar").length>0&&<div style={{marginBottom:12}}><div style={{fontSize:11,fontWeight:700,color:"#e65100",marginBottom:7}}>📚 Үгс</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>{(s.weak_words||[]).filter(w=>w.wtype!=="grammar").map((w,i)=><div key={i} style={{background:"#fff8f0",border:"1px solid #ffcc80",borderRadius:9,padding:"7px 10px"}}><div style={{fontWeight:700,fontSize:13,color:"#e65100"}}>{w.word}</div><div style={{fontSize:11,color:"#888"}}>{w.meaning}</div></div>)}</div></div>}
+              {(s.weak_words||[]).filter(w=>w.wtype==="grammar").length>0&&<div><div style={{fontSize:11,fontWeight:700,color:"#7c3aed",marginBottom:7}}>📖 Дүрэм</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>{(s.weak_words||[]).filter(w=>w.wtype==="grammar").map((w,i)=><div key={i} style={{background:"#f5f0ff",border:"1px solid #c5b8ff",borderRadius:9,padding:"7px 10px"}}><div style={{fontWeight:700,fontSize:13,color:"#7c3aed"}}>{w.word}</div><div style={{fontSize:11,color:"#888"}}>{w.meaning}</div></div>)}</div></div>}
             </div>
           )}
-          <div style={{marginTop:14,borderTop:"1px solid #f0f0f0",paddingTop:12}}>
-            <div style={{fontSize:11,color:"#888",marginBottom:6}}>Шинэ үг/дүрэм нэмэх:</div>
+          <div style={{marginTop:12,borderTop:"1px solid #f0f0f0",paddingTop:12}}>
             <div style={{position:"relative"}}>
-              <input value={weakSearch} onChange={e=>{setWeakSearch(e.target.value);setShowWeakDD(true);}} onFocus={()=>setShowWeakDD(true)}
-                placeholder="Ойлгохгүй үг хайх..." style={{...INP,fontSize:12,padding:"6px 10px"}}/>
+              <input value={weakSearch} onChange={e=>{setWeakSearch(e.target.value);setShowWeakDD(true);}} onFocus={()=>setShowWeakDD(true)} placeholder="Ойлгохгүй үг хайх..." style={{...INP,fontSize:12,padding:"6px 10px"}}/>
               {showWeakDD&&filteredVocab.length>0&&(
                 <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e0e0e0",borderRadius:10,boxShadow:"0 4px 16px #0002",zIndex:100,maxHeight:160,overflowY:"auto"}}>
                   {filteredVocab.map(v=>(
                     <div key={v.id} style={{padding:"8px 12px",fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #f5f5f5"}}>
                       <div><span style={{fontWeight:600}}>{v.word}</span><span style={{color:"#888",fontSize:11,marginLeft:6}}>{v.meaning}</span></div>
                       <div style={{display:"flex",gap:5}}>
-                        <button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"vocab"}]});setWeakSearch("");setShowWeakDD(false);}}
-                          style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #e65100",background:"#fff8f0",color:"#e65100",cursor:"pointer"}}>үг</button>
-                        {v.type==="grammar"&&<button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"grammar"}]});setWeakSearch("");setShowWeakDD(false);}}
-                          style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #7c3aed",background:"#f5f0ff",color:"#7c3aed",cursor:"pointer"}}>дүрэм</button>}
+                        <button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"vocab"}]});setWeakSearch("");setShowWeakDD(false);}} style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #e65100",background:"#fff8f0",color:"#e65100",cursor:"pointer"}}>үг</button>
+                        {v.type==="grammar"&&<button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"grammar"}]});setWeakSearch("");setShowWeakDD(false);}} style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #7c3aed",background:"#f5f0ff",color:"#7c3aed",cursor:"pointer"}}>дүрэм</button>}
                       </div>
                     </div>
                   ))}
@@ -1602,10 +1547,6 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
             </div>
           </div>
         </div>
-      )}
-
-      {tab==="vocab"&&(
-        <VocabTab vocabEntries={vocabEntries} t={t}/>
       )}
       {tab==="card"&&(
         <div ref={printRef}>
