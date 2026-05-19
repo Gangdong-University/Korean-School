@@ -56,6 +56,15 @@ let _levels = [
   {level:9,name:"Гранд Мастер",xp:1943},{level:10,name:"Легенд",xp:2584},
 ];
 
+// Ургамлын stage label — superadmin засаж болно
+let _plant_labels = [
+  "🌱 Тариалж байна",
+  "🌿 Ургаж байна",
+  "🌳 Хөгжиж байна",
+  "🌲 Цэцэглэж байна",
+  "✨ Хамгийн дээд!",
+];
+
 // role: superadmin = бүх эрх, нууц үг харах, төлбөр харах
 // role: teacher    = зөвхөн өөрийн анги, нууц үг/төлбөр харахгүй
 let _teachers = [
@@ -198,10 +207,13 @@ const PLANT_TYPES=[
 ];
 
 function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=false}){
-  const stage=miss>=3?0:Math.min(4,Math.floor(streak/3));
-  const h=miss===0?"healthy":miss===1?"wilting":"dry";
+  const STREAK_COMPLETE = 6;
+  const stage = miss>=3 ? 0 : Math.min(4, Math.floor(streak / (STREAK_COMPLETE/4)));
+  const completed = streak >= STREAK_COMPLETE && miss < 3;
+  const needNext = streak >= STREAK_COMPLETE + 1 && miss < 3;
   const sz=[0.7,0.82,0.94,1.06,1.2][stage];
   const labels=["🌱 Тариалж байна","🌿 Ургаж байна","🌳 Хөгжиж байна","🌲 Цэцэглэж байна","🏔️ Аварга!"];
+  const h = miss===0?"healthy":miss===1?"wilting":"dry";
   const missLabels=["","⚠️ Анхаарал!","🍂 Хатаж байна"];
   const [showSelect,setShowSelect]=useState(false);
 
@@ -504,9 +516,9 @@ function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=fals
         {renderPlant()}
       </div>
       <div style={{fontSize:11,fontWeight:700,color:miss===0?"#2e7d32":miss===1?"#e65100":"#c62828",marginTop:4}}>
-        {miss>=3?"💀 Унасан... шинээр эхэл":miss>=1?missLabels[miss]:labels2[stage]}
+        {miss>=3?"💀 Унасан... шинээр эхэл":miss>=1?missLabels[miss]:(_plant_labels[stage]||"✨ Хамгийн дээд!")}
       </div>
-      <div style={{fontSize:10,color:"#888",marginTop:2}}>{miss>=3?"💪 Дахин чармай":`🔥 ${streak} хичээлийн streak`}</div>
+      <div style={{fontSize:10,color:"#888",marginTop:2}}>{miss>=3?"💪 Дахин чармай":`🔥 ${streak}/6 streak`}</div>
     </div>
   );
 }
@@ -616,7 +628,70 @@ function Leaderboard({students,myId,classColor}){
   );
 }
 
-// ── AUTH ──────────────────────────────────────────────
+// ── VOCAB TAB ─────────────────────────────────────────
+function VocabTab({vocabEntries,t}){
+  const [selMonth,setSelMonth]=useState("all");
+  const months=["all",...[...new Set(vocabEntries.map(v=>v.month))].sort().reverse()];
+  const filtered=selMonth==="all"?vocabEntries:vocabEntries.filter(v=>v.month===selMonth);
+  const vocabs=filtered.filter(v=>v.type==="vocab");
+  const grammars=filtered.filter(v=>v.type==="grammar");
+  return(
+    <div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}>
+      <div style={{fontWeight:700,fontSize:14,color:t.text,marginBottom:10}}>📚 Үгс & Дүрэм</div>
+      {/* Month selector */}
+      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
+        {months.map(mo=>(
+          <button key={mo} onClick={()=>setSelMonth(mo)}
+            style={bs(selMonth===mo?t.accent:"#f0f0f0",selMonth===mo?"#fff":"#555",undefined,true)}>
+            {mo==="all"?"Бүгд":mo}
+          </button>
+        ))}
+      </div>
+      {/* Stats */}
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        <div style={{flex:1,textAlign:"center",background:t.soft,borderRadius:9,padding:"6px 4px"}}>
+          <div style={{fontSize:16,fontWeight:800,color:t.accent}}>{vocabs.length}</div>
+          <div style={{fontSize:9,color:"#888"}}>Үг</div>
+        </div>
+        <div style={{flex:1,textAlign:"center",background:t.soft,borderRadius:9,padding:"6px 4px"}}>
+          <div style={{fontSize:16,fontWeight:800,color:"#7c3aed"}}>{grammars.length}</div>
+          <div style={{fontSize:9,color:"#888"}}>Дүрэм</div>
+        </div>
+      </div>
+      {/* Vocab list */}
+      {vocabs.length>0&&(
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:12,fontWeight:700,color:t.accent,marginBottom:7}}>📚 Үгс ({vocabs.length})</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+            {vocabs.map(v=>(
+              <div key={v.id} style={{background:t.soft,borderRadius:9,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontWeight:700,fontSize:12,color:t.text}}>{v.word}</span>
+                <span style={{fontSize:11,color:t.text,opacity:.6}}>{v.meaning}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Grammar list */}
+      {grammars.length>0&&(
+        <div>
+          <div style={{fontSize:12,fontWeight:700,color:"#7c3aed",marginBottom:7}}>📖 Дүрэм ({grammars.length})</div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {grammars.map(v=>(
+              <div key={v.id} style={{background:"#f5f0ff",borderRadius:9,padding:"8px 12px",border:"1px solid #c5b8ff"}}>
+                <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:2}}>{v.word}</div>
+                <div style={{fontSize:11,color:"#555"}}>{v.meaning}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {vocabs.length===0&&grammars.length===0&&(
+        <div style={{textAlign:"center",padding:"20px 0",color:"#aaa",fontSize:13}}>Үг/дүрэм байхгүй байна</div>
+      )}
+    </div>
+  );
+}
 function AuthScreen({onAuth}){
   const [mode,setMode]=useState("teacher");
   const [email,setEmail]=useState("");
@@ -880,6 +955,198 @@ function ChangePasswordModal({onClose,teacherId,studentId}){
   );
 }
 
+function PlantConfirmModal({pendingPlant,isFirst,onConfirm,onBack}){
+  const pObj=PLANT_TYPES.find(p=>p.id===pendingPlant);
+  return(
+    <Overlay onClose={onBack} maxW={320}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:8}}>{pObj?.name.split(" ")[0]}</div>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:6}}>{pObj?.name}</div>
+        <div style={{fontSize:12,color:"#555",marginBottom:12,lineHeight:1.6}}>
+          <b>{pObj?.name}</b> тариалахдаа итгэлтэй байна уу?<br/>
+          {isFirst?(
+            <span style={{color:"#e65100"}}>⚠️ Суулгац хийсний дараа өөрчлөх боломжгүй.<br/>6 даалгавар хийж дуусгахад бүрэн ургана.</span>
+          ):(
+            <span style={{color:"#2e7d32"}}>✅ Шинэ ургамал тариалах гэж байна!</span>
+          )}
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onBack} style={{...bs("#fff","#333","#e0e0e0"),flex:1,justifyContent:"center"}}>← Буцах</button>
+          <button onClick={onConfirm} style={{...bs("#2e7d32","#fff"),flex:1,justifyContent:"center",fontWeight:700}}>✅ Тариалах!</button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+// ── PLANT SECTION ─────────────────────────────────────
+function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
+  const streak=s.hw_streak||0;
+  const miss=s.hw_miss||0;
+  const plantHistory=Array.isArray(s.plant_history)?s.plant_history:[];
+  const currentPlant=s.plant_type||null;
+  const completed=streak>=6&&miss<3;
+  const canPlantNext=streak>=7&&miss<3;
+  const [showSelect,setShowSelect]=useState(false);
+  const [pendingPlant,setPendingPlant]=useState(null);
+  const [showConfirm,setShowConfirm]=useState(false);
+  const [showAdminLabels,setShowAdminLabels]=useState(false);
+  const [labelList,setLabelList]=useState([..._plant_labels]);
+
+  const plantObj=currentPlant?PLANT_TYPES.find(p=>p.id===currentPlant):null;
+
+  const handleSelectPlant=(pid)=>{
+    setPendingPlant(pid);
+    setShowSelect(false);
+    setShowConfirm(true);
+  };
+
+  const confirmPlant=()=>{
+    const newHistory=currentPlant?[...plantHistory,currentPlant]:plantHistory;
+    upd({plant_type:pendingPlant,plant_history:newHistory,hw_streak:0,hw_miss:0});
+    setShowConfirm(false);
+    setPendingPlant(null);
+  };
+
+  return(
+    <div style={{background:t.soft,borderRadius:14,padding:12,marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontWeight:700,fontSize:12,color:t.text}}>🏡 Гэрийн даалгаврын streak</div>
+        {isAdmin&&!hideUI&&(
+          <button onClick={()=>setShowAdminLabels(true)} style={{fontSize:9,background:"#f0f0ff",border:"none",borderRadius:6,padding:"2px 7px",cursor:"pointer",color:"#7c3aed"}}>✏️ Label засах</button>
+        )}
+      </div>
+
+      {/* No plant selected yet */}
+      {!currentPlant&&isStudent&&(
+        <div style={{textAlign:"center",padding:"16px 0"}}>
+          <div style={{fontSize:32,marginBottom:8}}>🌱</div>
+          <div style={{fontSize:13,fontWeight:700,color:t.text,marginBottom:4}}>Ургамал сонгоорой!</div>
+          <div style={{fontSize:11,color:"#888",marginBottom:12}}>Суулгац хийсний дараа өөрчлөх боломжгүй.<br/>6 гэрийн даалгавар хийж дуусгахад бүрэн ургана.</div>
+          <button onClick={()=>setShowSelect(true)} style={{...bs(t.accent,"#fff"),padding:"8px 20px",fontWeight:700}}>🌱 Ургамал сонгох</button>
+        </div>
+      )}
+
+      {/* Plant selected - show current */}
+      {currentPlant&&(
+        <div>
+          {/* Previous plants - shown as small completed plants */}
+          {plantHistory.length>0&&(
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:10,color:"#888",marginBottom:5}}>🌟 Өмнөх ургамлууд</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {plantHistory.map((pt,i)=>{
+                  const pObj=PLANT_TYPES.find(p=>p.id===pt);
+                  return(
+                    <div key={i} style={{textAlign:"center",opacity:.85}}>
+                      <div style={{width:50,height:50,position:"relative"}}>
+                        <StreakTree streak={6} miss={0} plantType={pt} isStudent={false}/>
+                      </div>
+                      <div style={{fontSize:8,color:t.text,opacity:.7,marginTop:2}}>{pObj?.name||pt}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Current plant */}
+          <StreakTree streak={streak} miss={miss} plantType={currentPlant} isStudent={false}/>
+          {isStudent&&<div style={{textAlign:"center",fontSize:10,color:t.text,opacity:.5,marginTop:4}}>
+            {plantObj?.name||currentPlant}
+            {!completed&&<span> · Бүрэн ургахад {Math.max(0,6-streak)} streak үлдлээ</span>}
+          </div>}
+
+          {/* Next plant prompt */}
+          {canPlantNext&&isStudent&&(
+            <div style={{marginTop:10,background:"#e8f5e9",borderRadius:10,padding:"10px 12px",textAlign:"center",border:"2px solid #66bb6a"}}>
+              <div style={{fontSize:14,marginBottom:4}}>🎉 Ургамал чинь бүрэн ургалаа!</div>
+              <div style={{fontSize:11,color:"#555",marginBottom:8}}>Дараагийн ургамалыг тариалах уу?</div>
+              <button onClick={()=>setShowSelect(true)} style={{...bs("#2e7d32","#fff"),fontWeight:700}}>🌱 Дараагийн ургамал</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Admin view - show plant without student controls */}
+      {currentPlant&&isAdmin&&(
+        <div>
+          {plantHistory.length>0&&(
+            <div style={{marginBottom:8,display:"flex",gap:6,flexWrap:"wrap"}}>
+              {plantHistory.map((pt,i)=>{
+                const pObj=PLANT_TYPES.find(p=>p.id===pt);
+                return <span key={i} style={{fontSize:10,background:t.card,borderRadius:8,padding:"2px 7px",color:t.text}}>{pObj?.name||pt} ✓</span>;
+              })}
+            </div>
+          )}
+          <StreakTree streak={streak} miss={miss} plantType={currentPlant} isStudent={false}/>
+          <div style={{textAlign:"center",fontSize:10,color:"#888",marginTop:3}}>{plantObj?.name||currentPlant} · {streak}/6</div>
+        </div>
+      )}
+
+      <StatCards streak={streak} grammarLearned={s.grammar_learned||0} grammarTotal={s.grammar_total||0}
+        learnedVocab={0} totalVocab={0} present={0} sessions={0} accent={t.accent} card={t.card}/>
+
+      {/* Plant selector modal */}
+      {showSelect&&(
+        <Overlay onClose={()=>setShowSelect(false)} maxW={360}>
+          <div style={{fontWeight:700,fontSize:15,marginBottom:6}}>🌱 Ургамал сонгох</div>
+          <div style={{fontSize:11,color:"#e65100",background:"#fff8e1",borderRadius:8,padding:"6px 10px",marginBottom:12}}>
+            ⚠️ Суулгац хийсний дараа өөрчлөх боломжгүй!<br/>Бүрэн ургасны дараа дараагийнхаа сонголт нээгдэнэ.
+          </div>
+          <div style={{fontSize:11,fontWeight:600,color:"#555",marginBottom:6}}>🌳 Мод</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:12}}>
+            {PLANT_TYPES.filter(p=>p.type==="tree").map(p=>(
+              <div key={p.id} onClick={()=>handleSelectPlant(p.id)}
+                style={{background:"#f8f8f8",border:"2px solid #e0e0e0",borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"center",transition:"all .2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor="#2e7d32";e.currentTarget.style.background="#f1f8e9";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor="#e0e0e0";e.currentTarget.style.background="#f8f8f8";}}>
+                <div style={{fontSize:22,marginBottom:4}}>{p.name.split(" ")[0]}</div>
+                <div style={{fontSize:11,fontWeight:600}}>{p.name.split(" ").slice(1).join(" ")}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:11,fontWeight:600,color:"#555",marginBottom:6}}>🌸 Ургамал</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+            {PLANT_TYPES.filter(p=>p.type==="flower").map(p=>(
+              <div key={p.id} onClick={()=>handleSelectPlant(p.id)}
+                style={{background:"#f8f8f8",border:"2px solid #e0e0e0",borderRadius:12,padding:"10px 8px",cursor:"pointer",textAlign:"center",transition:"all .2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor="#e91e8c";e.currentTarget.style.background="#fff0f5";}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor="#e0e0e0";e.currentTarget.style.background="#f8f8f8";}}>
+                <div style={{fontSize:22,marginBottom:4}}>{p.name.split(" ")[0]}</div>
+                <div style={{fontSize:11,fontWeight:600}}>{p.name.split(" ").slice(1).join(" ")}</div>
+              </div>
+            ))}
+          </div>
+        </Overlay>
+      )}
+
+      {/* Confirm plant modal */}
+      {showConfirm&&pendingPlant&&<PlantConfirmModal
+        pendingPlant={pendingPlant}
+        isFirst={!currentPlant||plantHistory.length===0}
+        onConfirm={confirmPlant}
+        onBack={()=>{setShowConfirm(false);setShowSelect(true);}}
+      />}
+
+      {/* Admin label editor */}
+      {showAdminLabels&&(
+        <Overlay onClose={()=>setShowAdminLabels(false)} maxW={340}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>✏️ Ургамлын label засах</div>
+          {labelList.map((lbl,i)=>(
+            <div key={i} style={{marginBottom:8}}>
+              <div style={{fontSize:10,color:"#888",marginBottom:2}}>Үе шат {i+1}</div>
+              <input value={lbl} onChange={e=>{const u=[...labelList];u[i]=e.target.value;setLabelList(u);}}
+                style={{...INP,fontSize:12,padding:"5px 9px"}}/>
+            </div>
+          ))}
+          <button onClick={()=>{_plant_labels=[...labelList];setShowAdminLabels(false);}} style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",marginTop:4}}>✓ Хадгалах</button>
+        </Overlay>
+      )}
+    </div>
+  );
+}
+
 // ── CARD CONTENT ──────────────────────────────────────
 function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDays,vocabEntries,sessions,present,learnedVocab,totalVocab,onToggleAtt,hideUI,setShowPay,setEditNotes,editNotes,notes,setNotes,weakSearch,setWeakSearch,showWeakDD,setShowWeakDD}){
   const balance=(s.total_fee||0)-(s.total_paid||0);
@@ -954,13 +1221,8 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
         ))}
       </div>
 
-      {/* Streak */}
-      <div style={{background:t.soft,borderRadius:14,padding:12,marginBottom:10}}>
-        <div style={{fontWeight:700,fontSize:12,color:t.text,marginBottom:8,textAlign:"center"}}>🏡 Гэрийн даалгаврын streak</div>
-        <StreakTree streak={s.hw_streak||0} miss={s.hw_miss||0} plantType={s.plant_type||"cherry"} isStudent={!isAdmin} onSelectPlant={!isAdmin?(pt=>upd({plant_type:pt})):undefined}/>
-        <StatCards streak={s.hw_streak||0} grammarLearned={s.grammar_learned||0} grammarTotal={s.grammar_total||0}
-          learnedVocab={learnedVocab} totalVocab={totalVocab} present={present} sessions={sessions.length} accent={t.accent} card={t.card}/>
-      </div>
+      {/* Streak + Plant */}
+      <PlantSection s={s} t={t} isAdmin={isAdmin} isStudent={!isAdmin} upd={upd} hideUI={hideUI}/>
 
       {/* Attendance */}
       <div style={{background:t.soft,borderRadius:14,padding:12,marginBottom:10}}>
@@ -1128,6 +1390,11 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
   const present=sessions.filter(item=>(s.attendance||{})[item.date]).length;
   const allVocab=vocabEntries.filter(v=>v.type==="vocab");
   const learnedVocab=Math.max(0,allVocab.length-(s.weak_words||[]).length);
+  const filteredVocab=useMemo(()=>{
+    if(!weakSearch.trim())return[];
+    const q=weakSearch.toLowerCase();
+    return vocabEntries.filter(v=>(v.word.toLowerCase().includes(q)||v.meaning.toLowerCase().includes(q))&&!(s.weak_words||[]).find(w=>w.word===v.word)).slice(0,8);
+  },[weakSearch,vocabEntries,s.weak_words]);
   const printRef=useRef();
 
   const upd=useCallback(async patch=>{
@@ -1217,8 +1484,8 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
         </Overlay>
       )}
       <div style={{display:"flex",gap:6,marginBottom:14,background:t.soft,borderRadius:12,padding:4}}>
-        {[["card","📋 Миний карт"],["leaderboard","🏆 Жагсаалт"]].map(item=>(
-          <button key={item[0]} onClick={()=>setTab(item[0])} style={{flex:1,padding:"9px",borderRadius:9,border:"none",background:tab===item[0]?t.card:"transparent",color:tab===item[0]?t.accent:t.text,fontWeight:tab===item[0]?700:400,fontSize:12,cursor:"pointer"}}>{item[1]}</button>
+        {[["card","📋 Карт"],["vocab","📚 Үгс"],["weak","⚠️ Эргэлзэж буй"],["leaderboard","🏆 Жагсаалт"]].map(item=>(
+          <button key={item[0]} onClick={()=>setTab(item[0])} style={{flex:1,padding:"8px 2px",borderRadius:9,border:"none",background:tab===item[0]?t.card:"transparent",color:tab===item[0]?t.accent:t.text,fontWeight:tab===item[0]?700:400,fontSize:10,cursor:"pointer"}}>{item[1]}</button>
         ))}
       </div>
       {tab==="leaderboard"&&(
@@ -1226,6 +1493,72 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
           <div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div>
           <Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/>
         </div>
+      )}
+
+      {tab==="weak"&&(
+        <div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}>
+          <div style={{fontWeight:700,fontSize:14,color:t.text,marginBottom:12}}>⚠️ Эргэлзэж буй үгс & дүрэм</div>
+          {(s.weak_words||[]).length===0?(
+            <div style={{textAlign:"center",padding:"20px 0",color:"#aaa",fontSize:13}}>🎉 Эргэлзэж буй үг байхгүй!</div>
+          ):(
+            <div>
+              {(s.weak_words||[]).filter(w=>w.wtype!=="grammar").length>0&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#e65100",marginBottom:7}}>📚 Эргэлзэж буй үгс</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                    {(s.weak_words||[]).filter(w=>w.wtype!=="grammar").map((w,i)=>(
+                      <div key={i} style={{background:"#fff8f0",border:"1px solid #ffcc80",borderRadius:9,padding:"7px 10px"}}>
+                        <div style={{fontWeight:700,fontSize:13,color:"#e65100"}}>{w.word}</div>
+                        <div style={{fontSize:11,color:"#888"}}>{w.meaning}</div>
+                        <div style={{fontSize:9,color:"#bbb",marginTop:2}}>✕{w.miss} удаа</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(s.weak_words||[]).filter(w=>w.wtype==="grammar").length>0&&(
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",marginBottom:7}}>📖 Эргэлзэж буй дүрэм</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                    {(s.weak_words||[]).filter(w=>w.wtype==="grammar").map((w,i)=>(
+                      <div key={i} style={{background:"#f5f0ff",border:"1px solid #c5b8ff",borderRadius:9,padding:"7px 10px"}}>
+                        <div style={{fontWeight:700,fontSize:13,color:"#7c3aed"}}>{w.word}</div>
+                        <div style={{fontSize:11,color:"#888"}}>{w.meaning}</div>
+                        <div style={{fontSize:9,color:"#bbb",marginTop:2}}>✕{w.miss} удаа</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <div style={{marginTop:14,borderTop:"1px solid #f0f0f0",paddingTop:12}}>
+            <div style={{fontSize:11,color:"#888",marginBottom:6}}>Шинэ үг/дүрэм нэмэх:</div>
+            <div style={{position:"relative"}}>
+              <input value={weakSearch} onChange={e=>{setWeakSearch(e.target.value);setShowWeakDD(true);}} onFocus={()=>setShowWeakDD(true)}
+                placeholder="Ойлгохгүй үг хайх..." style={{...INP,fontSize:12,padding:"6px 10px"}}/>
+              {showWeakDD&&filteredVocab.length>0&&(
+                <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e0e0e0",borderRadius:10,boxShadow:"0 4px 16px #0002",zIndex:100,maxHeight:160,overflowY:"auto"}}>
+                  {filteredVocab.map(v=>(
+                    <div key={v.id} style={{padding:"8px 12px",fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #f5f5f5"}}>
+                      <div><span style={{fontWeight:600}}>{v.word}</span><span style={{color:"#888",fontSize:11,marginLeft:6}}>{v.meaning}</span></div>
+                      <div style={{display:"flex",gap:5}}>
+                        <button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"vocab"}]});setWeakSearch("");setShowWeakDD(false);}}
+                          style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #e65100",background:"#fff8f0",color:"#e65100",cursor:"pointer"}}>үг</button>
+                        {v.type==="grammar"&&<button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"grammar"}]});setWeakSearch("");setShowWeakDD(false);}}
+                          style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #7c3aed",background:"#f5f0ff",color:"#7c3aed",cursor:"pointer"}}>дүрэм</button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab==="vocab"&&(
+        <VocabTab vocabEntries={vocabEntries} t={t}/>
       )}
       {tab==="card"&&(
         <div ref={printRef}>
@@ -1858,6 +2191,7 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
   const [ns,setNs]=useState({name:"",enroll_date:"",level:0,theme_id:"sakura",phone:"",email:"",password:"",rd:""});
   const [tick,setTick]=useState(0);
   const [showPayReport,setShowPayReport]=useState(false);
+  const [confirmDelCls,setConfirmDelCls]=useState(false);
 
   const vocabEntries=_db.vocab_entries.filter(v=>v.class_id===cls.id);
 
@@ -1929,10 +2263,7 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
               <button onClick={printVocabPDF} style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>🖨️</button>
               {isSuperAdmin&&<button onClick={()=>setShowPayReport(true)} style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>💰</button>}
               <button onClick={()=>setShowAddSt(true)} style={bs(cls.color,"#fff",undefined,true)}>+ Нэмэх</button>
-              {isSuperAdmin&&<button onClick={async()=>{if(window.confirm(`"${cls.name}" устгах уу?`)){
-                _db.classes=_db.classes.filter(c=>c.id!==cls.id);
-                await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"DELETE",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
-                goBack();}}} style={bs("#fff0f0","#e53935","#ffcdd2",true)}>🗑️</button>}
+              {isSuperAdmin&&<button onClick={()=>setConfirmDelCls(true)} style={bs("#fff0f0","#e53935","#ffcdd2",true)}>🗑️</button>}
             </div>
           )}
         </div>
@@ -2092,6 +2423,26 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
         )}
 
         {showPayReport&&<PaymentReport students={students} onClose={()=>setShowPayReport(false)}/>}
+
+        {confirmDelCls&&(
+          <Overlay onClose={()=>setConfirmDelCls(false)}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:8}}>🗑️</div>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:5}}>"{cls.name}" ангийг устгах уу?</div>
+              <div style={{fontSize:12,color:"#e53935",marginBottom:16}}>⚠️ Тухайн ангийн бүх мэдээлэл устана!</div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setConfirmDelCls(false)} style={{...bs("#fff","#333","#e0e0e0"),flex:1,justifyContent:"center"}}>Болих</button>
+                <button onClick={async()=>{
+                  const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+                  await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"DELETE",headers:h});
+                  _db.classes=_db.classes.filter(c=>c.id!==cls.id);
+                  setConfirmDelCls(false);
+                  goBack();
+                }} style={{...bs("#e53935","#fff"),flex:1,justifyContent:"center",fontWeight:700}}>Устгах</button>
+              </div>
+            </div>
+          </Overlay>
+        )}
       </div>
     </div>
   );
