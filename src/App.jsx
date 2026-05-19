@@ -2423,6 +2423,11 @@ export default function App(){
   const [loadErr,setLoadErr]=useState(null);
 
   const loadAll=useCallback(async()=>{
+    // 10 секундын дараа timeout
+    const timeout=setTimeout(()=>{
+      setLoading(false);
+      setLoadErr("Холболт удаж байна. Дахин оролдоно уу.");
+    },10000);
     try{
       const headers={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
       const [r1,r2,r3,r4,r5,r6,r7]=await Promise.all([
@@ -2435,26 +2440,29 @@ export default function App(){
         fetch(`${SUPA_URL}/rest/v1/teachers?select=*`,{headers}),
       ]);
       const [cls,sts,bds,voc,pays,pends,tchs]=await Promise.all([r1.json(),r2.json(),r3.json(),r4.json(),r5.json(),r6.json(),r7.json()]);
-      _db.classes=cls||[];
-      _db.students=(sts||[]).map(s=>({
+      clearTimeout(timeout);
+      _db.classes=Array.isArray(cls)?cls:[];
+      _db.students=Array.isArray(sts)?sts.map(s=>({
         ...s,
         badges:Array.isArray(s.badges)?s.badges:[],
         weak_words:Array.isArray(s.weak_words)?s.weak_words:(s.weak_words?JSON.parse(s.weak_words):[]),
         attendance:s.attendance&&typeof s.attendance==="object"?s.attendance:{},
-      }));
-      _db.vocab_entries=voc||[];
-      _db.payments=pays||[];
-      _db.badge_defs=bds||[];
+      })):[];
+      _db.vocab_entries=Array.isArray(voc)?voc:[];
+      _db.payments=Array.isArray(pays)?pays:[];
+      _db.badge_defs=Array.isArray(bds)?bds:[];
       _pending.length=0;
-      (pends||[]).forEach(p=>_pending.push(p));
-      if(tchs&&tchs.length>0){_teachers.length=0;tchs.forEach(t=>_teachers.push(t));}
+      if(Array.isArray(pends))pends.forEach(p=>_pending.push(p));
+      if(Array.isArray(tchs)&&tchs.length>0){_teachers.length=0;tchs.forEach(t=>_teachers.push(t));}
       setClasses([..._db.classes]);
       setStudents([..._db.students]);
       setBadgeDefs([..._db.badge_defs]);
       setLoadErr(null);
       setLoading(false);
     }catch(e){
-      if(loading)setLoadErr("Интернет холболт шалгана уу.");
+      clearTimeout(timeout);
+      console.error("Load error:",e);
+      setLoadErr("Интернет холболт шалгана уу.");
       setLoading(false);
     }
   },[]);
