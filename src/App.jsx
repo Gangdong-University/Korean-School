@@ -709,20 +709,67 @@ function AuthScreen({onAuth}){
 
   const clearForm=()=>{setEmail("");setPass("");setName("");setPhone("");setRd("");setConfirmPass("");setFEmail("");setFRd("");setFResult(null);setErr("");};
 
-  const loginTeacher=()=>{
+  const [loading2,setLoading2]=useState(false);
+
+  const loginTeacher=async()=>{
     setErr("");
-    const t=_teachers.find(x=>x.email.toLowerCase()===email.trim().toLowerCase()&&x.password===pass);
-    if(t) onAuth({id:t.id,role:"teacher",isSuperAdmin:t.role==="superadmin",displayName:t.name,class_ids:t.class_ids||null});
-    else setErr("И-мэйл эсвэл нууц үг буруу байна.");
+    setLoading2(true);
+    try{
+      let t2=_teachers.find(x=>x.email.toLowerCase()===email.trim().toLowerCase()&&x.password===pass);
+      if(!t2){
+        const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+        const em=encodeURIComponent(email.trim().toLowerCase());
+        const r=await fetch(`${SUPA_URL}/rest/v1/teachers?email=eq.${em}&select=*`,{headers:h});
+        const rows=await r.json();
+        if(rows&&rows.length>0&&rows[0].password===pass){
+          t2=rows[0];
+          if(!_teachers.find(x=>x.id===t2.id))_teachers.push(t2);
+        }
+      }
+      setLoading2(false);
+      if(t2) onAuth({id:t2.id,role:"teacher",isSuperAdmin:t2.role==="superadmin",displayName:t2.name,class_ids:t2.class_ids||null});
+      else setErr("И-мэйл эсвэл нууц үг буруу байна.");
+    }catch(e){
+      setLoading2(false);
+      setErr("Холболтын алдаа гарлаа. Дахин оролдоно уу.");
+    }
   };
 
-  const loginStudent=()=>{
+  const loginStudent=async()=>{
     setErr("");
-    const st=_db.students.find(s=>s.email&&s.email.toLowerCase()===email.trim().toLowerCase()&&s.password===pass);
-    if(st){onAuth({id:st.id,role:"student",displayName:st.name});return;}
-    const pend=_pending.find(p=>p.email.toLowerCase()===email.trim().toLowerCase());
-    if(pend) setErr("Таны бүртгэл багшийн зөвшөөрлийг хүлээж байна. ⏳");
-    else setErr("И-мэйл эсвэл нууц үг буруу байна.");
+    setLoading2(true);
+    try{
+      // Эхлээд local-д хайна
+      let st=_db.students.find(s=>s.email&&s.email.toLowerCase()===email.trim().toLowerCase()&&s.password===pass);
+      // Local-д байхгүй бол Supabase-аас шууд хайна
+      if(!st){
+        const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+        const em=encodeURIComponent(email.trim().toLowerCase());
+        const r=await fetch(`${SUPA_URL}/rest/v1/students?email=eq.${em}&select=*`,{headers:h});
+        const rows=await r.json();
+        if(rows&&rows.length>0&&rows[0].password===pass){
+          st={...rows[0],
+            badges:Array.isArray(rows[0].badges)?rows[0].badges:[],
+            weak_words:Array.isArray(rows[0].weak_words)?rows[0].weak_words:(rows[0].weak_words?JSON.parse(rows[0].weak_words):[]),
+            attendance:rows[0].attendance&&typeof rows[0].attendance==="object"?rows[0].attendance:{},
+          };
+          // _db-д нэмнэ
+          if(!_db.students.find(x=>x.id===st.id))_db.students.push(st);
+        }
+      }
+      if(st){setLoading2(false);onAuth({id:st.id,role:"student",displayName:st.name});return;}
+      // Pending шалгана
+      const h2={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+      const em2=encodeURIComponent(email.trim().toLowerCase());
+      const r2=await fetch(`${SUPA_URL}/rest/v1/pending_students?email=eq.${em2}&select=*`,{headers:h2});
+      const prows=await r2.json();
+      if(prows&&prows.length>0){setLoading2(false);setErr("Таны бүртгэл багшийн зөвшөөрлийг хүлээж байна. ⏳");return;}
+      setLoading2(false);
+      setErr("И-мэйл эсвэл нууц үг буруу байна.");
+    }catch(e){
+      setLoading2(false);
+      setErr("Холболтын алдаа гарлаа. Дахин оролдоно уу.");
+    }
   };
 
   const register=async()=>{
@@ -827,7 +874,7 @@ function AuthScreen({onAuth}){
                 <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:14,opacity:.5}}>{showPass?"🙈":"👁"}</span>
               </div>
             </div>
-            <button onClick={loginTeacher} style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700}}>Нэвтрэх</button>
+            <button onClick={loginTeacher} disabled={loading2} style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700,opacity:loading2?.7:1}}>{loading2?"⏳ Нэвтрэж байна...":"Нэвтрэх"}</button>
           </div>
         )}
 
@@ -847,7 +894,7 @@ function AuthScreen({onAuth}){
             <div style={{textAlign:"right",marginBottom:14}}>
               <span onClick={()=>{setMode("forgot");clearForm();}} style={{fontSize:11,color:"#7c3aed",cursor:"pointer",fontWeight:600}}>Нууц үгээ мартсан уу?</span>
             </div>
-            <button onClick={loginStudent} style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700}}>Нэвтрэх</button>
+            <button onClick={loginStudent} disabled={loading2} style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700,opacity:loading2?.7:1}}>{loading2?"⏳ Нэвтрэж байна...":"Нэвтрэх"}</button>
             <div style={{marginTop:10,textAlign:"center",fontSize:11,color:"#aaa"}}>
               Бүртгэл байхгүй юу? <span onClick={()=>{setMode("register");clearForm();}} style={{color:"#7c3aed",cursor:"pointer",fontWeight:600}}>Бүртгүүлэх</span>
             </div>
@@ -2531,8 +2578,17 @@ export default function App(){
   if(!user)return <AuthScreen onAuth={setUser}/>;
 
   if(user.role==="student"){
-    const s=students.find(x=>x.id===user.id);
-    if(!s)return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui"}}>Мэдээлэл олдсонгүй.</div>;
+    const s=students.find(x=>x.id===user.id)||_db.students.find(x=>x.id===user.id);
+    if(!s){
+      // Өгөгдөл ачаалагдаагүй байна — дахин хайна
+      return(
+        <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",background:"linear-gradient(135deg,#667eea,#764ba2)"}}>
+          <div style={{fontSize:40,marginBottom:12}}>🏫</div>
+          <div style={{fontSize:14,fontWeight:600,color:"#fff",marginBottom:8}}>Мэдээлэл ачаалж байна...</div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,.7)"}}>Түр хүлээнэ үү</div>
+        </div>
+      );
+    }
     const cls=_db.classes.find(c=>c.id===s.class_id);
     const ve=_db.vocab_entries.filter(v=>v.class_id===s.class_id);
     const classmates=students.filter(x=>x.class_id===s.class_id);
