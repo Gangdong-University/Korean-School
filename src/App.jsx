@@ -208,11 +208,10 @@ const PLANT_TYPES=[
 
 function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=false}){
   const STREAK_COMPLETE = 6;
-  const stage = miss>=3 ? 0 : Math.min(4, Math.floor(streak / (STREAK_COMPLETE/4)));
-  const completed = streak >= STREAK_COMPLETE && miss < 3;
-  const needNext = streak >= STREAK_COMPLETE + 1 && miss < 3;
+  // stage 0=seed, 1=sprout, 2=growing, 3=flowering, 4=complete
+  // Only reach stage 4 when streak >= 6
+  const stage = miss>=3 ? 0 : streak===0 ? 0 : Math.min(4, Math.ceil(streak / (STREAK_COMPLETE/4)));
   const sz=[0.7,0.82,0.94,1.06,1.2][stage];
-  const labels=["🌱 Тариалж байна","🌿 Ургаж байна","🌳 Хөгжиж байна","🌲 Цэцэглэж байна","🏔️ Аварга!"];
   const h = miss===0?"healthy":miss===1?"wilting":"dry";
   const missLabels=["","⚠️ Анхаарал!","🍂 Хатаж байна"];
   const [showSelect,setShowSelect]=useState(false);
@@ -1050,8 +1049,13 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
   };
 
   const confirmPlant=()=>{
-    const newHistory=currentPlant?[...plantHistory,currentPlant]:plantHistory;
-    upd({plant_type:pendingPlant,plant_history:newHistory,hw_streak:0,hw_miss:0});
+    const isReplant=!!currentPlant;
+    const newHistory=isReplant?[...plantHistory,currentPlant]:plantHistory;
+    // Дахин тариалахад л streak reset хийнэ, анх сонгохдоо хийхгүй
+    const patch=isReplant
+      ?{plant_type:pendingPlant,plant_history:newHistory,hw_streak:0,hw_miss:0}
+      :{plant_type:pendingPlant,plant_history:newHistory};
+    upd(patch);
     setShowConfirm(false);
     setPendingPlant(null);
   };
@@ -1084,10 +1088,10 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
         </div>
       )}
 
-      {/* Plant selected - show current */}
+      {/* Plant selected */}
       {currentPlant&&(
         <div>
-          {/* Previous plants - shown as small completed plants */}
+          {/* Previous plants */}
           {plantHistory.length>0&&(
             <div style={{marginBottom:10}}>
               <div style={{fontSize:10,color:"#888",marginBottom:5}}>🌟 Өмнөх ургамлууд</div>
@@ -1096,7 +1100,7 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
                   const pObj=PLANT_TYPES.find(p=>p.id===pt);
                   return(
                     <div key={i} style={{textAlign:"center",opacity:.85}}>
-                      <div style={{width:50,height:50,position:"relative"}}>
+                      <div style={{width:50,height:50}}>
                         <StreakTree streak={6} miss={0} plantType={pt} isStudent={false}/>
                       </div>
                       <div style={{fontSize:8,color:t.text,opacity:.7,marginTop:2}}>{pObj?.name||pt}</div>
@@ -1109,12 +1113,12 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
 
           {/* Current plant */}
           <StreakTree streak={streak} miss={miss} plantType={currentPlant} isStudent={false}/>
-          {isStudent&&<div style={{textAlign:"center",fontSize:10,color:t.text,opacity:.5,marginTop:4}}>
-            {plantObj?.name||currentPlant}
-            {!completed&&<span> · Бүрэн ургахад {Math.max(0,6-streak)} streak үлдлээ</span>}
-          </div>}
+          <div style={{textAlign:"center",fontSize:10,color:t.text,opacity:.5,marginTop:4}}>
+            {plantObj?.name||currentPlant} · {streak}/6
+            {isStudent&&streak<6&&<span> · {Math.max(0,6-streak)} streak үлдлээ</span>}
+          </div>
 
-          {/* Next plant prompt */}
+          {/* Next plant prompt - student only */}
           {canPlantNext&&isStudent&&(
             <div style={{marginTop:10,background:"#e8f5e9",borderRadius:10,padding:"10px 12px",textAlign:"center",border:"2px solid #66bb6a"}}>
               <div style={{fontSize:14,marginBottom:4}}>🎉 Ургамал чинь бүрэн ургалаа!</div>
@@ -1122,22 +1126,6 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
               <button onClick={()=>setShowSelect(true)} style={{...bs("#2e7d32","#fff"),fontWeight:700}}>🌱 Дараагийн ургамал</button>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Admin view - show plant without student controls */}
-      {currentPlant&&isAdmin&&(
-        <div>
-          {plantHistory.length>0&&(
-            <div style={{marginBottom:8,display:"flex",gap:6,flexWrap:"wrap"}}>
-              {plantHistory.map((pt,i)=>{
-                const pObj=PLANT_TYPES.find(p=>p.id===pt);
-                return <span key={i} style={{fontSize:10,background:t.card,borderRadius:8,padding:"2px 7px",color:t.text}}>{pObj?.name||pt} ✓</span>;
-              })}
-            </div>
-          )}
-          <StreakTree streak={streak} miss={miss} plantType={currentPlant} isStudent={false}/>
-          <div style={{textAlign:"center",fontSize:10,color:"#888",marginTop:3}}>{plantObj?.name||currentPlant} · {streak}/6</div>
         </div>
       )}
 
