@@ -1031,7 +1031,8 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
   const streak=s.hw_streak||0;
   const miss=s.hw_miss||0;
   const plantHistory=Array.isArray(s.plant_history)?s.plant_history:[];
-  const currentPlant=s.plant_type||null;
+  const currentPlant=s.plant_type&&s.plant_type!=="null"?s.plant_type:null;
+  const hasChosen=!!(s.plant_type&&s.plant_type!=="null");
   const completed=streak>=6&&miss<3;
   const canPlantNext=streak>=7&&miss<3;
   const [showSelect,setShowSelect]=useState(false);
@@ -1071,6 +1072,15 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
           <div style={{fontSize:13,fontWeight:700,color:t.text,marginBottom:4}}>Ургамал сонгоорой!</div>
           <div style={{fontSize:11,color:"#888",marginBottom:12}}>Суулгац хийсний дараа өөрчлөх боломжгүй.<br/>6 гэрийн даалгавар хийж дуусгахад бүрэн ургана.</div>
           <button onClick={()=>setShowSelect(true)} style={{...bs(t.accent,"#fff"),padding:"8px 20px",fontWeight:700}}>🌱 Ургамал сонгох</button>
+        </div>
+      )}
+
+      {/* Has plant but show change button for student if not yet started (streak=0) */}
+      {currentPlant&&isStudent&&streak===0&&miss===0&&(
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <button onClick={()=>setShowSelect(true)} style={{fontSize:11,background:"#f0f0f0",border:"none",borderRadius:8,padding:"4px 12px",cursor:"pointer",color:"#555"}}>
+            🔄 Ургамал солих (streak эхлээгүй)
+          </button>
         </div>
       )}
 
