@@ -712,36 +712,33 @@ function AuthScreen({onAuth}){
     setErr("");
     setLoading2(true);
     try{
-      // Эхлээд local-д хайна
-      let st=_db.students.find(s=>s.email&&s.email.toLowerCase()===email.trim().toLowerCase()&&s.password===pass);
-      // Local-д байхгүй бол Supabase-аас шууд хайна
-      if(!st){
-        const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
-        const em=encodeURIComponent(email.trim().toLowerCase());
-        const r=await fetch(`${SUPA_URL}/rest/v1/students?email=eq.${em}&select=*`,{headers:h});
-        const rows=await r.json();
-        if(rows&&rows.length>0&&rows[0].password===pass){
-          st={...rows[0],
-            badges:Array.isArray(rows[0].badges)?rows[0].badges:[],
-            weak_words:Array.isArray(rows[0].weak_words)?rows[0].weak_words:(rows[0].weak_words?JSON.parse(rows[0].weak_words):[]),
-            attendance:rows[0].attendance&&typeof rows[0].attendance==="object"?rows[0].attendance:{},
-          };
-          // _db-д нэмнэ
-          if(!_db.students.find(x=>x.id===st.id))_db.students.push(st);
-        }
+      const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+      const em=email.trim().toLowerCase();
+      // Бүх сурагчдыг татаад client дээр шүүнэ
+      const r=await fetch(`${SUPA_URL}/rest/v1/students?select=*`,{headers:h});
+      const rows=await r.json();
+      const st=Array.isArray(rows)?rows.find(s=>s.email&&s.email.toLowerCase()===em&&s.password===pass):null;
+      if(st){
+        const mapped={...st,
+          badges:Array.isArray(st.badges)?st.badges:[],
+          weak_words:Array.isArray(st.weak_words)?st.weak_words:(st.weak_words?JSON.parse(st.weak_words):[]),
+          attendance:st.attendance&&typeof st.attendance==="object"?st.attendance:{},
+        };
+        if(!_db.students.find(x=>x.id===mapped.id))_db.students.push(mapped);
+        setLoading2(false);
+        onAuth({id:st.id,role:"student",displayName:st.name});
+        return;
       }
-      if(st){setLoading2(false);onAuth({id:st.id,role:"student",displayName:st.name});return;}
       // Pending шалгана
-      const h2={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
-      const em2=encodeURIComponent(email.trim().toLowerCase());
-      const r2=await fetch(`${SUPA_URL}/rest/v1/pending_students?email=eq.${em2}&select=*`,{headers:h2});
+      const r2=await fetch(`${SUPA_URL}/rest/v1/pending_students?select=*`,{headers:h});
       const prows=await r2.json();
-      if(prows&&prows.length>0){setLoading2(false);setErr("Таны бүртгэл багшийн зөвшөөрлийг хүлээж байна. ⏳");return;}
+      const pend=Array.isArray(prows)?prows.find(p=>p.email&&p.email.toLowerCase()===em):null;
       setLoading2(false);
-      setErr("И-мэйл эсвэл нууц үг буруу байна.");
+      if(pend) setErr("Таны бүртгэл багшийн зөвшөөрлийг хүлээж байна. ⏳");
+      else setErr("И-мэйл эсвэл нууц үг буруу байна.");
     }catch(e){
       setLoading2(false);
-      setErr("Холболтын алдаа гарлаа. Дахин оролдоно уу.");
+      setErr("Холболтын алдаа. Дахин оролдоно уу.");
     }
   };
 
@@ -2419,7 +2416,7 @@ export default function App(){
   const [showAccounts,setShowAccounts]=useState(false);
   const [attMonth,setAttMonth]=useState(new Date().toISOString().slice(0,7));
   const [nc,setNc]=useState({name:"",time:"",days:[],color:"#e91e8c"});
-  const [loading,setLoading]=useState(true);
+  const [loading,setLoading]=useState(false);
   const [loadErr,setLoadErr]=useState(null);
 
   const loadAll=useCallback(async()=>{
@@ -2468,13 +2465,15 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
-    loadAll();
-    // Auto-refresh every 30 seconds
-    const interval=setInterval(()=>{
-      if(document.visibilityState==="visible") loadAll();
-    },30000);
-    return()=>clearInterval(interval);
-  },[loadAll]);
+    // Нэвтэрсний дараа л өгөгдөл ачаална
+    if(user){
+      loadAll();
+      const interval=setInterval(()=>{
+        if(document.visibilityState==="visible") loadAll();
+      },30000);
+      return()=>clearInterval(interval);
+    }
+  },[user,loadAll]);
 
   const isTeacher=user?.role==="teacher";
   const isSuperAdmin=!!(user?.isSuperAdmin);
