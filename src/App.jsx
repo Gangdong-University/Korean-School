@@ -714,17 +714,31 @@ function AuthScreen({onAuth}){
     try{
       const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
       const em=email.trim().toLowerCase();
-      // Бүх сурагчдыг татаад client дээр шүүнэ
       const r=await fetch(`${SUPA_URL}/rest/v1/students?select=*`,{headers:h});
       const rows=await r.json();
-      const st=Array.isArray(rows)?rows.find(s=>s.email&&s.email.toLowerCase()===em&&s.password===pass):null;
+      if(!Array.isArray(rows)){
+        setLoading2(false);
+        setErr("Холболтын алдаа. Дахин оролдоно уу.");
+        return;
+      }
+      const st=rows.find(s=>s.email&&s.email.toLowerCase()===em&&s.password===pass);
       if(st){
-        const mapped={...st,
-          badges:Array.isArray(st.badges)?st.badges:[],
-          weak_words:Array.isArray(st.weak_words)?st.weak_words:(st.weak_words?JSON.parse(st.weak_words):[]),
-          attendance:st.attendance&&typeof st.attendance==="object"?st.attendance:{},
-        };
-        if(!_db.students.find(x=>x.id===mapped.id))_db.students.push(mapped);
+        // Бүх хэрэгтэй өгөгдлийг татна
+        const [rc,rv,rp]=await Promise.all([
+          fetch(`${SUPA_URL}/rest/v1/classes?select=*`,{headers:h}),
+          fetch(`${SUPA_URL}/rest/v1/vocab_entries?select=*`,{headers:h}),
+          fetch(`${SUPA_URL}/rest/v1/payments?select=*`,{headers:h}),
+        ]);
+        const [cls,voc,pays]=await Promise.all([rc.json(),rv.json(),rp.json()]);
+        _db.classes=Array.isArray(cls)?cls:[];
+        _db.vocab_entries=Array.isArray(voc)?voc:[];
+        _db.payments=Array.isArray(pays)?pays:[];
+        _db.students=rows.map(s=>({
+          ...s,
+          badges:Array.isArray(s.badges)?s.badges:[],
+          weak_words:Array.isArray(s.weak_words)?s.weak_words:(s.weak_words?JSON.parse(s.weak_words):[]),
+          attendance:s.attendance&&typeof s.attendance==="object"?s.attendance:{},
+        }));
         setLoading2(false);
         onAuth({id:st.id,role:"student",displayName:st.name});
         return;
@@ -2465,8 +2479,7 @@ export default function App(){
   },[]);
 
   useEffect(()=>{
-    // Нэвтэрсний дараа л өгөгдөл ачаална
-    if(user){
+    if(user&&user.role==="teacher"){
       loadAll();
       const interval=setInterval(()=>{
         if(document.visibilityState==="visible") loadAll();
