@@ -206,15 +206,12 @@ const PLANT_TYPES=[
   {id:"daisy",name:"🌼 Хризантем",type:"flower"},
 ];
 
-function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=false}){
+function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=false,showSelect,setShowSelect}){
   const STREAK_COMPLETE = 6;
-  // stage 0=seed, 1=sprout, 2=growing, 3=flowering, 4=complete
-  // Only reach stage 4 when streak >= 6
   const stage = miss>=3 ? 0 : streak===0 ? 0 : Math.min(4, Math.ceil(streak / (STREAK_COMPLETE/4)));
   const sz=[0.7,0.82,0.94,1.06,1.2][stage];
   const h = miss===0?"healthy":miss===1?"wilting":"dry";
   const missLabels=["","⚠️ Анхаарал!","🍂 Хатаж байна"];
-  const [showSelect,setShowSelect]=useState(false);
 
   const renderPlant=()=>{
     const alive=miss<3;
@@ -488,29 +485,6 @@ function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=fals
   const labels2=["🌱 Тариалж байна","🌿 Ургаж байна","🌳 Хөгжиж байна","🌲 Цэцэглэж байна","✨ Хамгийн дээд!"];
   return(
     <div style={{textAlign:"center"}}>
-      {isStudent&&(
-        <div style={{marginBottom:6}}>
-          <button onClick={()=>setShowSelect(s=>!s)} style={{fontSize:10,background:"#f0f0f0",border:"none",borderRadius:8,padding:"3px 10px",cursor:"pointer",color:"#555"}}>
-            {plant.name} ▾
-          </button>
-          {showSelect&&(
-            <div style={{position:"absolute",zIndex:50,background:"#fff",borderRadius:12,boxShadow:"0 4px 20px #0002",padding:10,marginTop:4,left:"50%",transform:"translateX(-50%)",width:220}}>
-              <div style={{fontSize:10,fontWeight:600,color:"#888",marginBottom:6}}>Мод сонгох</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
-                {PLANT_TYPES.filter(p=>p.type==="tree").map(p=>(
-                  <button key={p.id} onClick={()=>{onSelectPlant&&onSelectPlant(p.id);setShowSelect(false);}} style={{fontSize:11,padding:"4px 8px",borderRadius:7,border:`1px solid ${plantType===p.id?"#7c3aed":"#e0e0e0"}`,background:plantType===p.id?"#f0f0ff":"#fff",cursor:"pointer"}}>{p.name}</button>
-                ))}
-              </div>
-              <div style={{fontSize:10,fontWeight:600,color:"#888",marginBottom:6}}>Ургамал сонгох</div>
-              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                {PLANT_TYPES.filter(p=>p.type==="flower").map(p=>(
-                  <button key={p.id} onClick={()=>{onSelectPlant&&onSelectPlant(p.id);setShowSelect(false);}} style={{fontSize:11,padding:"4px 8px",borderRadius:7,border:`1px solid ${plantType===p.id?"#e91e8c":"#e0e0e0"}`,background:plantType===p.id?"#fff0f5":"#fff",cursor:"pointer"}}>{p.name}</button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
       <div style={{width:95,height:95,margin:"0 auto",position:"relative",transform:`scale(${sz})`,transition:"transform .5s"}}>
         {renderPlant()}
       </div>
@@ -1101,7 +1075,7 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
                   return(
                     <div key={i} style={{textAlign:"center",opacity:.85}}>
                       <div style={{width:50,height:50}}>
-                        <StreakTree streak={6} miss={0} plantType={pt} isStudent={false}/>
+                        <StreakTree streak={6} miss={0} plantType={pt} isStudent={false} showSelect={false} setShowSelect={()=>{}}/>
                       </div>
                       <div style={{fontSize:8,color:t.text,opacity:.7,marginTop:2}}>{pObj?.name||pt}</div>
                     </div>
@@ -1112,7 +1086,7 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
           )}
 
           {/* Current plant */}
-          <StreakTree streak={streak} miss={miss} plantType={currentPlant} isStudent={false}/>
+          <StreakTree streak={streak} miss={miss} plantType={currentPlant} isStudent={false} showSelect={false} setShowSelect={()=>{}}/>
           <div style={{textAlign:"center",fontSize:10,color:t.text,opacity:.5,marginTop:4}}>
             {plantObj?.name||currentPlant} · {streak}/6
             {isStudent&&streak<6&&<span> · {Math.max(0,6-streak)} streak үлдлээ</span>}
