@@ -183,30 +183,328 @@ function XPBar({xp,accent}){
   );
 }
 
-function StreakTree({streak,miss}){
+// ── PLANT TYPES ───────────────────────────────────────
+const PLANT_TYPES=[
+  {id:"cherry",name:"🌸 Интоор",type:"tree"},
+  {id:"apple",name:"🍎 Алим",type:"tree"},
+  {id:"pine",name:"🌲 Нарс",type:"tree"},
+  {id:"maple",name:"🍁 Агч",type:"tree"},
+  {id:"bamboo",name:"🎋 Хулс",type:"tree"},
+  {id:"rose",name:"🌹 Сарнай",type:"flower"},
+  {id:"sunflower",name:"🌻 Наран цэцэг",type:"flower"},
+  {id:"tulip",name:"🌷 Тюльпан",type:"flower"},
+  {id:"lavender",name:"💜 Лаванда",type:"flower"},
+  {id:"daisy",name:"🌼 Хризантем",type:"flower"},
+];
+
+function StreakTree({streak,miss,plantType="cherry",onSelectPlant,isStudent=false}){
   const stage=miss>=3?0:Math.min(4,Math.floor(streak/3));
   const h=miss===0?"healthy":miss===1?"wilting":"dry";
-  const gc=h==="healthy"?"#3D8F20":h==="wilting"?"#8B7820":"#7A5535";
-  const tc=h==="healthy"?"#2E7D10":h==="wilting"?"#7A6A15":"#6A4525";
-  const trunk=h==="healthy"?"#5A3820":h==="wilting"?"#8A7050":"#9A8060";
   const sz=[0.7,0.82,0.94,1.06,1.2][stage];
-  const labels=["🌱 Тариалж байна","🌿 Ургаж байна","🌳 Хөгжиж байна","🌲 Цэцэглэж байна","🏔️ Аварга мод!"];
+  const labels=["🌱 Тариалж байна","🌿 Ургаж байна","🌳 Хөгжиж байна","🌲 Цэцэглэж байна","🏔️ Аварга!"];
   const missLabels=["","⚠️ Анхаарал!","🍂 Хатаж байна"];
+  const [showSelect,setShowSelect]=useState(false);
+
+  const renderPlant=()=>{
+    const alive=miss<3;
+    const filter=miss>=2?"saturate(0.2)":miss===1?"saturate(0.5)":"none";
+    if(plantType==="cherry"){
+      const trunk=h==="healthy"?"#5A3820":"#9A8060";
+      const leaf=h==="healthy"?"#2E7D10":"#7A6A15";
+      const bloom=stage>=3&&h==="healthy";
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          {stage>=1&&<rect x="37" y={52+stage} width={8-stage} height={20-stage} rx="3" fill={trunk}/>}
+          {stage===0&&<line x1="40" y1="58" x2="40" y2="46" stroke={leaf} strokeWidth="3" strokeLinecap="round"/>}
+          <ellipse cx="40" cy={46-stage*3} rx={12+stage*5} ry={9+stage*4} fill={leaf} opacity=".9"/>
+          {stage>=2&&<ellipse cx={26-stage} cy={50-stage} rx={8+stage*2} ry={6+stage} fill={h==="healthy"?"#1b5e20":"#6A4525"} opacity=".85"/>}
+          {stage>=2&&<ellipse cx={54+stage} cy={50-stage} rx={8+stage*2} ry={6+stage} fill={h==="healthy"?"#1b5e20":"#6A4525"} opacity=".85"/>}
+          {stage>=3&&<ellipse cx="40" cy={28-stage} rx={13+stage*2} ry={10+stage} fill={leaf} opacity=".88"/>}
+          {stage===0&&<circle cx="40" cy="43" r="9" fill={leaf} opacity=".9"/>}
+          {bloom&&[{x:20,y:24},{x:54,y:18},{x:38,y:12},{x:48,y:34},{x:28,y:31}].map((p,i)=>(
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r="5" fill="#FFB7C5" opacity=".9"/>
+              <circle cx={p.x} cy={p.y} r="2" fill="#FF69B4" opacity=".8"/>
+            </g>
+          ))}
+          {bloom&&[{x:30,y:45},{x:50,y:42},{x:15,y:43},{x:63,y:41}].map((p,i)=>(
+            <circle key={i} cx={p.x} cy={p.y} r="3" fill="#FFB7C5" opacity=".7"/>
+          ))}
+        </svg>
+      );
+    }
+    if(plantType==="apple"){
+      const trunk="#6B3A2A";
+      const leaf=h==="healthy"?"#2E7D32":"#8B7820";
+      const hasApple=stage>=3&&h==="healthy";
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          {stage>=1&&<rect x="37" y={52+stage} width={8-stage} height={20-stage} rx="3" fill={trunk}/>}
+          {stage===0&&<line x1="40" y1="58" x2="40" y2="46" stroke={leaf} strokeWidth="3" strokeLinecap="round"/>}
+          <ellipse cx="40" cy={44-stage*3} rx={13+stage*5} ry={10+stage*4} fill={leaf} opacity=".9"/>
+          {stage>=2&&<ellipse cx="26" cy="48" rx="9" ry="7" fill={h==="healthy"?"#1b5e20":"#6A4525"} opacity=".85"/>}
+          {stage>=2&&<ellipse cx="54" cy="48" rx="9" ry="7" fill={h==="healthy"?"#1b5e20":"#6A4525"} opacity=".85"/>}
+          {stage>=3&&<ellipse cx="40" cy="26" rx="14" ry="11" fill={leaf} opacity=".88"/>}
+          {stage===0&&<circle cx="40" cy="43" r="9" fill={leaf} opacity=".9"/>}
+          {hasApple&&[{x:22,y:36},{x:56,y:30},{x:40,y:20},{x:28,y:46},{x:52,y:44}].map((p,i)=>(
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r="5" fill="#E53935" opacity=".95"/>
+              <ellipse cx={p.x-1} cy={p.y-2} rx="1.5" ry="2" fill="#EF9A9A" opacity=".6"/>
+              <line x1={p.x} y1={p.y-5} x2={p.x} y2={p.y-8} stroke="#4CAF50" strokeWidth="1.5"/>
+            </g>
+          ))}
+        </svg>
+      );
+    }
+    if(plantType==="pine"){
+      const trunk=h==="healthy"?"#5D4037":"#9A8060";
+      const c1=h==="healthy"?"#1B5E20":"#7A6A15";
+      const c2=h==="healthy"?"#2E7D32":"#8B7820";
+      const c3=h==="healthy"?"#388E3C":"#9B8A30";
+      const hasSnow=stage>=4;
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          <rect x="37" y="60" width="6" height="15" rx="2" fill={trunk}/>
+          {stage>=1&&<polygon points="40,42 28,60 52,60" fill={c1} opacity=".9"/>}
+          {stage>=2&&<polygon points="40,30 26,52 54,52" fill={c2} opacity=".9"/>}
+          {stage>=3&&<polygon points="40,18 27,42 53,42" fill={c3} opacity=".9"/>}
+          {stage>=4&&<polygon points="40,8 29,30 51,30" fill={c3} opacity=".9"/>}
+          {stage===0&&<polygon points="40,42 32,58 48,58" fill={c1} opacity=".9"/>}
+          {hasSnow&&[{x:40,y:10},{x:34,y:20},{x:46,y:22},{x:30,y:32},{x:50,y:30}].map((p,i)=>(
+            <circle key={i} cx={p.x} cy={p.y} r="3" fill="white" opacity=".9"/>
+          ))}
+        </svg>
+      );
+    }
+    if(plantType==="maple"){
+      const trunk=h==="healthy"?"#5D4037":"#9A8060";
+      const leafC=h==="healthy"?(stage>=3?"#E53935":"#E65100"):"#7A5535";
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          {stage>=1&&<rect x="37" y={52+stage} width={7-stage} height={20-stage} rx="3" fill={trunk}/>}
+          {stage===0&&<line x1="40" y1="58" x2="40" y2="46" stroke={leafC} strokeWidth="3" strokeLinecap="round"/>}
+          {stage>=1&&(
+            <g>
+              <polygon points="40,20 35,30 25,28 30,36 20,38 30,42 28,52 40,48 52,52 50,42 60,38 50,36 55,28 45,30" fill={leafC} opacity=".9" transform={`scale(${0.5+stage*0.15}) translate(${40*(1-0.5-stage*0.15)},${20*(1-0.5-stage*0.15)})`}/>
+            </g>
+          )}
+          {stage===0&&<circle cx="40" cy="43" r="9" fill={leafC} opacity=".9"/>}
+          {stage>=3&&h==="healthy"&&[{x:18,y:30},{x:62,y:28},{x:40,y:12},{x:22,y:48},{x:58,y:46}].map((p,i)=>(
+            <circle key={i} cx={p.x} cy={p.y} r="3" fill="#FFD54F" opacity=".8"/>
+          ))}
+        </svg>
+      );
+    }
+    if(plantType==="bamboo"){
+      const c=h==="healthy"?"#558B2F":"#7A6A15";
+      const lc=h==="healthy"?"#33691E":"#6A5A10";
+      const segs=Math.min(5,stage+1);
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          {[0,1,2].map(col=>{
+            const x=32+col*8;
+            const heightPct=[0.6,1,0.75][col];
+            const totalH=55*heightPct;
+            const y=72-totalH;
+            return(
+              <g key={col}>
+                {Array.from({length:Math.ceil(segs*heightPct)}).map((_,i)=>{
+                  const segH=totalH/Math.ceil(segs*heightPct);
+                  const sy=y+i*segH;
+                  return(
+                    <g key={i}>
+                      <rect x={x} y={sy} width="5" height={segH-1} rx="2" fill={c} opacity=".9"/>
+                      <rect x={x} y={sy+segH-2} width="5" height="2" fill={lc} opacity=".9"/>
+                      {i%2===0&&stage>=2&&<ellipse cx={x+(col===1?-8:8)} cy={sy+segH/2} rx="6" ry="3" fill={c} opacity=".7" transform={`rotate(${col===1?-20:20},${x+(col===1?-8:8)},${sy+segH/2})`}/>}
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })}
+        </svg>
+      );
+    }
+    // Flowers
+    if(plantType==="rose"){
+      const stem=h==="healthy"?"#2E7D32":"#7A6A15";
+      const petal=h==="healthy"?"#E91E8C":"#AD5A7A";
+      const bloomed=stage>=2&&h==="healthy";
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          <line x1="40" y1="70" x2="40" y2={bloomed?30:50} stroke={stem} strokeWidth="3"/>
+          {stage>=1&&<ellipse cx="32" cy="55" rx="7" ry="4" fill={stem} opacity=".7" transform="rotate(-30,32,55)"/>}
+          {stage>=2&&<ellipse cx="48" cy="48" rx="7" ry="4" fill={stem} opacity=".7" transform="rotate(30,48,48)"/>}
+          {bloomed?(
+            <>
+              {[0,60,120,180,240,300].map((deg,i)=>(
+                <ellipse key={i} cx={40+Math.cos(deg*Math.PI/180)*8} cy={30+Math.sin(deg*Math.PI/180)*8} rx="6" ry="4" fill={petal} opacity=".85" transform={`rotate(${deg},${40+Math.cos(deg*Math.PI/180)*8},${30+Math.sin(deg*Math.PI/180)*8})`}/>
+              ))}
+              <circle cx="40" cy="30" r="5" fill="#FFD700" opacity=".9"/>
+              {stage>=4&&[{x:20,y:25},{x:60,y:20},{x:40,y:12},{x:55,y:35}].map((p,i)=>(
+                <g key={i}>
+                  {[0,60,120,180,240,300].map((deg,j)=>(
+                    <ellipse key={j} cx={p.x+Math.cos(deg*Math.PI/180)*5} cy={p.y+Math.sin(deg*Math.PI/180)*5} rx="4" ry="3" fill={petal} opacity=".75" transform={`rotate(${deg},${p.x+Math.cos(deg*Math.PI/180)*5},${p.y+Math.sin(deg*Math.PI/180)*5})`}/>
+                  ))}
+                  <circle cx={p.x} cy={p.y} r="3" fill="#FFD700" opacity=".8"/>
+                </g>
+              ))}
+            </>
+          ):(
+            <circle cx="40" cy={bloomed?30:50} r={stage*3+4} fill={petal} opacity=".8"/>
+          )}
+        </svg>
+      );
+    }
+    if(plantType==="sunflower"){
+      const stem=h==="healthy"?"#388E3C":"#7A6A15";
+      const petal=h==="healthy"?"#FDD835":"#B8860B";
+      const bloomed=stage>=2&&h==="healthy";
+      const cy=bloomed?25:45;
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          <line x1="40" y1="72" x2="40" y2={cy+10} stroke={stem} strokeWidth="4"/>
+          {stage>=1&&<ellipse cx="30" cy="55" rx="9" ry="5" fill={stem} opacity=".6" transform="rotate(-25,30,55)"/>}
+          {stage>=3&&<ellipse cx="50" cy="45" rx="9" ry="5" fill={stem} opacity=".6" transform="rotate(25,50,45)"/>}
+          {bloomed?(
+            <>
+              {[0,45,90,135,180,225,270,315].map((deg,i)=>(
+                <ellipse key={i} cx={40+Math.cos(deg*Math.PI/180)*13} cy={cy+Math.sin(deg*Math.PI/180)*13} rx="7" ry="4" fill={petal} opacity=".9" transform={`rotate(${deg},${40+Math.cos(deg*Math.PI/180)*13},${cy+Math.sin(deg*Math.PI/180)*13})`}/>
+              ))}
+              <circle cx="40" cy={cy} r="9" fill="#5D4037" opacity=".9"/>
+              <circle cx="40" cy={cy} r="6" fill="#3E2723" opacity=".7"/>
+              {stage>=4&&[{x:15,y:20},{x:65,y:18},{x:40,y:8}].map((p,i)=>(
+                <g key={i}>
+                  {[0,45,90,135,180,225,270,315].map((deg,j)=>(
+                    <ellipse key={j} cx={p.x+Math.cos(deg*Math.PI/180)*8} cy={p.y+Math.sin(deg*Math.PI/180)*8} rx="5" ry="3" fill={petal} opacity=".8" transform={`rotate(${deg},${p.x+Math.cos(deg*Math.PI/180)*8},${p.y+Math.sin(deg*Math.PI/180)*8})`}/>
+                  ))}
+                  <circle cx={p.x} cy={p.y} r="5" fill="#5D4037" opacity=".85"/>
+                </g>
+              ))}
+            </>
+          ):(
+            <circle cx="40" cy={cy} r={stage*4+5} fill={petal} opacity=".8"/>
+          )}
+        </svg>
+      );
+    }
+    if(plantType==="tulip"){
+      const stem=h==="healthy"?"#2E7D32":"#7A6A15";
+      const petal=h==="healthy"?"#E91E63":"#AD5A7A";
+      const bloomed=stage>=2&&h==="healthy";
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          <line x1="40" y1="72" x2="40" y2={bloomed?30:48} stroke={stem} strokeWidth="3.5"/>
+          {stage>=1&&<ellipse cx="31" cy="58" rx="8" ry="4" fill={stem} opacity=".6" transform="rotate(-30,31,58)"/>}
+          {stage>=3&&<ellipse cx="49" cy="50" rx="8" ry="4" fill={stem} opacity=".6" transform="rotate(30,49,50)"/>}
+          {bloomed?(
+            <>
+              <ellipse cx="33" cy="32" rx="7" ry="12" fill={petal} opacity=".85" transform="rotate(-15,33,32)"/>
+              <ellipse cx="47" cy="32" rx="7" ry="12" fill={petal} opacity=".85" transform="rotate(15,47,32)"/>
+              <ellipse cx="40" cy="28" rx="6" ry="13" fill={`${petal}cc`} opacity=".9"/>
+              <ellipse cx="40" cy="38" rx="8" ry="6" fill={petal} opacity=".7"/>
+              {stage>=4&&[{x:18,y:22},{x:62,y:20},{x:55,y:38}].map((p,i)=>(
+                <g key={i}>
+                  <ellipse cx={p.x-4} cy={p.y+3} rx="5" ry="9" fill={petal} opacity=".75" transform={`rotate(-15,${p.x-4},${p.y+3})`}/>
+                  <ellipse cx={p.x+4} cy={p.y+3} rx="5" ry="9" fill={petal} opacity=".75" transform={`rotate(15,${p.x+4},${p.y+3})`}/>
+                  <ellipse cx={p.x} cy={p.y} rx="4" ry="10" fill={`${petal}cc`} opacity=".8"/>
+                </g>
+              ))}
+            </>
+          ):(
+            <ellipse cx="40" cy={bloomed?30:50} rx={5+stage*2} ry={8+stage*2} fill={petal} opacity=".8"/>
+          )}
+        </svg>
+      );
+    }
+    if(plantType==="lavender"){
+      const stem=h==="healthy"?"#558B2F":"#7A6A15";
+      const petal=h==="healthy"?"#7C3AED":"#9C6BC0";
+      const bloomed=stage>=2&&h==="healthy";
+      const stems=bloomed?[{x:35,y:25},{x:40,y:20},{x:45,y:23},{x:30,y:30},{x:50,y:28}]:[];
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          <line x1="40" y1="72" x2="40" y2="50" stroke={stem} strokeWidth="3"/>
+          {stage>=1&&<line x1="40" y1="62" x2="30" y2="55" stroke={stem} strokeWidth="2.5"/>}
+          {stage>=1&&<line x1="40" y1="62" x2="50" y2="55" stroke={stem} strokeWidth="2.5"/>}
+          {bloomed&&stems.map((p,i)=>(
+            <g key={i}>
+              <line x1="40" y1="50" x2={p.x} y2={p.y+15} stroke={stem} strokeWidth="2"/>
+              {[0,4,8,12,16].map((dy,j)=>(
+                <ellipse key={j} cx={p.x} cy={p.y+15-dy} rx="3" ry="2" fill={petal} opacity={.6+dy*.02}/>
+              ))}
+            </g>
+          ))}
+          {!bloomed&&<ellipse cx="40" cy="45" rx={5+stage*2} ry={8+stage*2} fill={petal} opacity=".7"/>}
+        </svg>
+      );
+    }
+    if(plantType==="daisy"){
+      const stem=h==="healthy"?"#388E3C":"#7A6A15";
+      const petal=h==="healthy"?"#FFF9C4":"#C8B860";
+      const center=h==="healthy"?"#FFD54F":"#B8A030";
+      const bloomed=stage>=2&&h==="healthy";
+      return(
+        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%",filter}}>
+          <line x1="40" y1="72" x2="40" y2={bloomed?30:48} stroke={stem} strokeWidth="3.5"/>
+          {stage>=1&&<ellipse cx="31" cy="60" rx="8" ry="4" fill={stem} opacity=".6" transform="rotate(-25,31,60)"/>}
+          {stage>=3&&<ellipse cx="50" cy="52" rx="8" ry="4" fill={stem} opacity=".6" transform="rotate(25,50,52)"/>}
+          {bloomed?(
+            <>
+              {[0,30,60,90,120,150,180,210,240,270,300,330].map((deg,i)=>(
+                <ellipse key={i} cx={40+Math.cos(deg*Math.PI/180)*12} cy={30+Math.sin(deg*Math.PI/180)*12} rx="5" ry="3" fill={petal} opacity=".9" transform={`rotate(${deg},${40+Math.cos(deg*Math.PI/180)*12},${30+Math.sin(deg*Math.PI/180)*12})`}/>
+              ))}
+              <circle cx="40" cy="30" r="7" fill={center} opacity=".95"/>
+              {stage>=4&&[{x:16,y:20},{x:64,y:18},{x:40,y:8},{x:60,y:36}].map((p,i)=>(
+                <g key={i}>
+                  {[0,30,60,90,120,150,180,210,240,270,300,330].map((deg,j)=>(
+                    <ellipse key={j} cx={p.x+Math.cos(deg*Math.PI/180)*8} cy={p.y+Math.sin(deg*Math.PI/180)*8} rx="4" ry="2.5" fill={petal} opacity=".8" transform={`rotate(${deg},${p.x+Math.cos(deg*Math.PI/180)*8},${p.y+Math.sin(deg*Math.PI/180)*8})`}/>
+                  ))}
+                  <circle cx={p.x} cy={p.y} r="4" fill={center} opacity=".85"/>
+                </g>
+              ))}
+            </>
+          ):(
+            <circle cx="40" cy={bloomed?30:50} r={stage*4+5} fill={petal} opacity=".8"/>
+          )}
+        </svg>
+      );
+    }
+    return null;
+  };
+
+  const plant=PLANT_TYPES.find(p=>p.id===plantType)||PLANT_TYPES[0];
+  const labels2=["🌱 Тариалж байна","🌿 Ургаж байна","🌳 Хөгжиж байна","🌲 Цэцэглэж байна","✨ Хамгийн дээд!"];
   return(
     <div style={{textAlign:"center"}}>
-      <div style={{width:90,height:90,margin:"0 auto",filter:miss>=2?"saturate(0.25)":miss===1?"saturate(0.6)":"none",transition:"all .5s",transform:`scale(${sz})`}}>
-        <svg viewBox="0 0 80 80" style={{width:"100%",height:"100%"}}>
-          {stage>=1&&<rect x="35" y={55+stage} width={10-stage} height={18-stage} rx="3" fill={trunk}/>}
-          {stage===0&&<line x1="40" y1="60" x2="40" y2="48" stroke={gc} strokeWidth="3" strokeLinecap="round"/>}
-          <ellipse cx="40" cy={48-stage*3} rx={10+stage*5} ry={8+stage*4} fill={gc} opacity=".9"/>
-          {stage>=2&&<ellipse cx={26-stage} cy={52-stage} rx={8+stage*2} ry={6+stage} fill={tc} opacity=".85"/>}
-          {stage>=2&&<ellipse cx={54+stage} cy={52-stage} rx={8+stage*2} ry={6+stage} fill={tc} opacity=".85"/>}
-          {stage>=3&&<ellipse cx="40" cy={30-stage} rx={12+stage*2} ry={9+stage} fill={gc} opacity=".88"/>}
-          {stage===0&&<circle cx="40" cy="44" r="9" fill={gc} opacity=".9"/>}
-        </svg>
+      {isStudent&&(
+        <div style={{marginBottom:6}}>
+          <button onClick={()=>setShowSelect(s=>!s)} style={{fontSize:10,background:"#f0f0f0",border:"none",borderRadius:8,padding:"3px 10px",cursor:"pointer",color:"#555"}}>
+            {plant.name} ▾
+          </button>
+          {showSelect&&(
+            <div style={{position:"absolute",zIndex:50,background:"#fff",borderRadius:12,boxShadow:"0 4px 20px #0002",padding:10,marginTop:4,left:"50%",transform:"translateX(-50%)",width:220}}>
+              <div style={{fontSize:10,fontWeight:600,color:"#888",marginBottom:6}}>Мод сонгох</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
+                {PLANT_TYPES.filter(p=>p.type==="tree").map(p=>(
+                  <button key={p.id} onClick={()=>{onSelectPlant&&onSelectPlant(p.id);setShowSelect(false);}} style={{fontSize:11,padding:"4px 8px",borderRadius:7,border:`1px solid ${plantType===p.id?"#7c3aed":"#e0e0e0"}`,background:plantType===p.id?"#f0f0ff":"#fff",cursor:"pointer"}}>{p.name}</button>
+                ))}
+              </div>
+              <div style={{fontSize:10,fontWeight:600,color:"#888",marginBottom:6}}>Ургамал сонгох</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {PLANT_TYPES.filter(p=>p.type==="flower").map(p=>(
+                  <button key={p.id} onClick={()=>{onSelectPlant&&onSelectPlant(p.id);setShowSelect(false);}} style={{fontSize:11,padding:"4px 8px",borderRadius:7,border:`1px solid ${plantType===p.id?"#e91e8c":"#e0e0e0"}`,background:plantType===p.id?"#fff0f5":"#fff",cursor:"pointer"}}>{p.name}</button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{width:95,height:95,margin:"0 auto",position:"relative",transform:`scale(${sz})`,transition:"transform .5s"}}>
+        {renderPlant()}
       </div>
       <div style={{fontSize:11,fontWeight:700,color:miss===0?"#2e7d32":miss===1?"#e65100":"#c62828",marginTop:4}}>
-        {miss>=3?"💀 Унасан... шинээр эхэл":miss>=1?missLabels[miss]:labels[stage]}
+        {miss>=3?"💀 Унасан... шинээр эхэл":miss>=1?missLabels[miss]:labels2[stage]}
       </div>
       <div style={{fontSize:10,color:"#888",marginTop:2}}>{miss>=3?"💪 Дахин чармай":`🔥 ${streak} хичээлийн streak`}</div>
     </div>
@@ -247,7 +545,7 @@ function AttendanceStats({present,total,allPresent,card}){
       </div>
       <div style={{flex:1,background:card,borderRadius:8,padding:"5px 8px",textAlign:"center"}}>
         <div style={{fontSize:14,fontWeight:800,color:total-present>0?"#e65100":"#2e7d32"}}>{total-present}</div>
-        <div style={{fontSize:9,color:"#888"}}>Тасалсан</div>
+        <div style={{fontSize:9,color:"#888"}}>Ирцгүй</div>
       </div>
     </div>
   );
@@ -258,33 +556,36 @@ function Leaderboard({students,myId,classColor}){
   const myRank=sorted.findIndex(s=>s.id===myId)+1;
   const top3=sorted.slice(0,3);
   const rest=sorted.slice(3);
-  const podiumOrder=[1,0,2];
-  const heights=["60px","80px","45px"];
+  // podiumOrder: display positions [2nd-left, 1st-center, 3rd-right]
+  const displayOrder=[1,0,2]; // indices into top3
+  const podiumHeights=[75,95,55]; // heights for 2nd, 1st, 3rd
   const medals=["🥇","🥈","🥉"];
-  const podiumColors=["#C0C0C0","#FFD700","#CD7F32"];
+  const podiumColors=["#FFD700","#C0C0C0","#CD7F32"]; // 1st=gold, 2nd=silver, 3rd=bronze
   return(
     <div>
       {myRank>0&&<div style={{textAlign:"center",marginBottom:8,fontSize:12,color:"#888"}}>Таны байр: <b style={{color:classColor}}>#{myRank}</b> / {students.length}</div>}
       {top3.length>0&&(
         <div style={{display:"flex",alignItems:"flex-end",justifyContent:"center",gap:8,marginBottom:18}}>
-          {podiumOrder.map(idx=>{
-            if(!top3[idx])return <div key={idx} style={{flex:1}}/>;
-            const s=top3[idx];
-            const rank=idx+1;
+          {displayOrder.map((top3Idx,displayPos)=>{
+            if(!top3[top3Idx])return <div key={displayPos} style={{flex:1}}/>;
+            const s=top3[top3Idx];
+            const rank=top3Idx+1; // actual rank: 1, 2, or 3
             const t2=getT(s.theme_id);
             const isMe=s.id===myId;
             const lvl=getLvl(s.xp||0);
+            const pColor=podiumColors[top3Idx]; // color by actual rank
+            const pHeight=podiumHeights[displayPos]; // height by display position
             return(
               <div key={s.id} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center"}}>
                 <div style={{position:"relative",marginBottom:5}}>
-                  <div style={{width:rank===1?54:42,height:rank===1?54:42,borderRadius:"50%",border:`3px solid ${podiumColors[idx]}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:rank===1?20:16,boxShadow:isMe?`0 0 0 3px ${classColor}`:"none"}}>
+                  <div style={{width:rank===1?56:42,height:rank===1?56:42,borderRadius:"50%",border:`3px solid ${pColor}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:rank===1?22:16,boxShadow:isMe?`0 0 0 3px ${classColor}`:rank===1?`0 0 10px ${pColor}88`:"none"}}>
                     {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",borderRadius:"50%",objectFit:"cover"}} alt=""/>:t2.emoji}
                   </div>
-                  <div style={{position:"absolute",top:-8,right:-8,fontSize:rank===1?16:13}}>{medals[idx]}</div>
+                  <div style={{position:"absolute",top:-8,right:-8,fontSize:rank===1?18:13}}>{medals[top3Idx]}</div>
                 </div>
                 <div style={{fontSize:10,fontWeight:700,color:isMe?classColor:"#333",textAlign:"center",maxWidth:64,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name.split(" ")[0]}</div>
                 <div style={{fontSize:9,color:"#888",marginBottom:3}}>⚡{s.xp||0} · Lv.{lvl.level}</div>
-                <div style={{width:"100%",height:heights[idx],background:podiumColors[idx],borderRadius:"7px 7px 0 0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:"#fff",opacity:.9}}>{rank}</div>
+                <div style={{width:"100%",height:pHeight,background:pColor,borderRadius:"7px 7px 0 0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:800,color:rank===1?"#7c3a00":"#fff",opacity:.95}}>{rank}</div>
               </div>
             );
           })}
@@ -656,7 +957,7 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
       {/* Streak */}
       <div style={{background:t.soft,borderRadius:14,padding:12,marginBottom:10}}>
         <div style={{fontWeight:700,fontSize:12,color:t.text,marginBottom:8,textAlign:"center"}}>🏡 Гэрийн даалгаврын streak</div>
-        <StreakTree streak={s.hw_streak||0} miss={s.hw_miss||0}/>
+        <StreakTree streak={s.hw_streak||0} miss={s.hw_miss||0} plantType={s.plant_type||"cherry"} isStudent={!isAdmin} onSelectPlant={!isAdmin?(pt=>upd({plant_type:pt})):undefined}/>
         <StatCards streak={s.hw_streak||0} grammarLearned={s.grammar_learned||0} grammarTotal={s.grammar_total||0}
           learnedVocab={learnedVocab} totalVocab={totalVocab} present={present} sessions={sessions.length} accent={t.accent} card={t.card}/>
       </div>
@@ -742,10 +1043,12 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:8}}>
           {weakSorted.map((w,i)=>{
             const c=w.miss>=3?"#c62828":w.miss>=1?"#e65100":"#2e7d32";
+            const typeColor=w.wtype==="grammar"?"#7c3aed":"#e65100";
             return(
               <div key={i} style={{background:c+"15",border:`1px solid ${c}`,borderRadius:16,padding:"3px 9px",fontSize:11,color:c,display:"flex",alignItems:"center",gap:4}}>
                 <span style={{fontWeight:600}}>{w.word}</span>
                 {w.meaning&&<span style={{opacity:.6,fontSize:10}}>{w.meaning}</span>}
+                {w.wtype&&<span style={{fontSize:9,background:typeColor+"20",color:typeColor,borderRadius:8,padding:"1px 5px"}}>{w.wtype==="grammar"?"дүрэм":"үг"}</span>}
                 <span style={{fontSize:9,opacity:.7}}>✕{w.miss}</span>
                 {isAdmin&&!hideUI&&(
                   <span style={{display:"inline-flex",gap:2}}>
@@ -758,17 +1061,26 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
           })}
           {!weakSorted.length&&<div style={{fontSize:11,color:t.text,opacity:.4}}>Анхаарах үг байхгүй 🎉</div>}
         </div>
-        {isAdmin&&!hideUI&&(
+        {(isAdmin||!isAdmin)&&(
           <div style={{position:"relative"}}>
             <input value={weakSearch} onChange={e=>{setWeakSearch(e.target.value);setShowWeakDD(true);}} onFocus={()=>setShowWeakDD(true)}
-              placeholder="Үг хайх (ангийн үгсээс)..." style={{...INP,fontSize:12,padding:"6px 10px"}}/>
+              placeholder="Ойлгохгүй үг/дүрэм хайх..." style={{...INP,fontSize:12,padding:"6px 10px"}}/>
             {showWeakDD&&filteredVocab.length>0&&(
               <div style={{position:"absolute",top:"100%",left:0,right:0,background:"#fff",border:"1px solid #e0e0e0",borderRadius:10,boxShadow:"0 4px 16px #0002",zIndex:100,maxHeight:180,overflowY:"auto"}}>
                 {filteredVocab.map(v=>(
-                  <div key={v.id} onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1}]});setWeakSearch("");setShowWeakDD(false);}}
-                    style={{padding:"8px 12px",cursor:"pointer",fontSize:12,display:"flex",justifyContent:"space-between",borderBottom:"1px solid #f5f5f5"}}>
-                    <span style={{fontWeight:600}}>{v.word}</span>
-                    <span style={{color:"#888",fontSize:11}}>{v.meaning} · {v.month}</span>
+                  <div key={v.id} style={{padding:"8px 12px",cursor:"pointer",fontSize:12,display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #f5f5f5"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#f5f0ff"}
+                    onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                    <div>
+                      <span style={{fontWeight:600}}>{v.word}</span>
+                      <span style={{color:"#888",fontSize:11,marginLeft:6}}>{v.meaning}</span>
+                    </div>
+                    <div style={{display:"flex",gap:5}}>
+                      <button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"vocab"}]});setWeakSearch("");setShowWeakDD(false);}}
+                        style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #e65100",background:"#fff8f0",color:"#e65100",cursor:"pointer"}}>эргэлзэж буй үг</button>
+                      {v.type==="grammar"&&<button onClick={()=>{upd({weak_words:[...(s.weak_words||[]),{word:v.word,meaning:v.meaning,miss:1,wtype:"grammar"}]});setWeakSearch("");setShowWeakDD(false);}}
+                        style={{fontSize:10,padding:"2px 7px",borderRadius:6,border:"1px solid #7c3aed",background:"#f5f0ff",color:"#7c3aed",cursor:"pointer"}}>эргэлзэж буй дүрэм</button>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -808,6 +1120,9 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
   const [tab,setTab]=useState("card");
   const [attM,setAttM]=useState(attMonth);
   const [showChangePw,setShowChangePw]=useState(false);
+  const [showThemes,setShowThemes]=useState(false);
+  const [showEditStart,setShowEditStart]=useState(false);
+  const [startDate,setStartDate]=useState(s.enroll_date||"");
   const t=getT(s.theme_id);
   const sessions=getSessions(classDays,attM);
   const present=sessions.filter(item=>(s.attendance||{})[item.date]).length;
@@ -833,15 +1148,74 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
     setTimeout(()=>{w.focus();w.print();},300);
   };
 
+  const [weakSearch,setWeakSearch]=useState("");
+  const [showWeakDD,setShowWeakDD]=useState(false);
+
   return(
     <div style={{minHeight:"100vh",background:t.bg,fontFamily:"system-ui",maxWidth:480,margin:"0 auto",padding:14,overflowX:"hidden",boxSizing:"border-box"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
         <button onClick={goBack} style={bs(t.card,t.text,t.border,true)}>← Гарах</button>
         <div style={{flex:1,fontWeight:700,fontSize:15,color:t.text,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
+        <button onClick={()=>setShowThemes(true)} style={bs(t.soft,t.accent,t.border,true)}>🎨</button>
         <button onClick={()=>setShowChangePw(true)} style={bs(t.soft,t.accent,t.border,true)}>🔐</button>
         <button onClick={doPrint} style={bs(t.accent,"#fff",undefined,true)}>🖨️</button>
       </div>
       {showChangePw&&<ChangePasswordModal onClose={()=>setShowChangePw(false)} studentId={s.id}/>}
+
+      {/* Theme selector modal */}
+      {showThemes&&(
+        <Overlay onClose={()=>setShowThemes(false)} maxW={360}>
+          <div style={{fontWeight:700,fontSize:15,marginBottom:12}}>🎨 Өөрийн theme сонгох</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
+            {THEMES.map(tm=>(
+              <div key={tm.id} onClick={()=>{upd({theme_id:tm.id});setShowThemes(false);}}
+                style={{background:tm.card,border:`2px solid ${s.theme_id===tm.id?tm.accent:tm.border}`,borderRadius:11,padding:"8px 4px",cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:18,marginBottom:2}}>{tm.emoji}</div>
+                <div style={{fontSize:9,color:tm.text,fontWeight:500}}>{tm.name.split(" ").slice(1).join(" ")}</div>
+              </div>
+            ))}
+          </div>
+        </Overlay>
+      )}
+
+      {/* Photo upload for student */}
+      <div style={{display:"flex",gap:8,marginBottom:12,alignItems:"center",background:t.soft,borderRadius:12,padding:"8px 12px"}}>
+        <div style={{position:"relative",flexShrink:0}}>
+          <div style={{width:50,height:50,borderRadius:"50%",overflow:"hidden",border:`2px solid ${t.accent}`,background:t.card,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>
+            {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t.emoji}
+          </div>
+          <label style={{position:"absolute",bottom:-2,right:-2,width:18,height:18,borderRadius:"50%",background:t.accent,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:9,color:"#fff"}}>
+            📷
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+              const file=e.target.files&&e.target.files[0];
+              if(!file)return;
+              const reader=new FileReader();
+              reader.onload=ev=>upd({photo_url:ev.target.result});
+              reader.readAsDataURL(file);
+            }}/>
+          </label>
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:12,fontWeight:700,color:t.text}}>{s.name}</div>
+          <div style={{fontSize:10,color:t.text,opacity:.6,display:"flex",alignItems:"center",gap:4}}>
+            📅 {s.enroll_date||"—"}
+            <span onClick={()=>setShowEditStart(true)} style={{cursor:"pointer",fontSize:9,opacity:.6}}>✏️</span>
+          </div>
+        </div>
+        {s.photo_url&&<span onClick={()=>upd({photo_url:null})} style={{fontSize:10,color:"#e53935",cursor:"pointer"}}>✕ Зураг</span>}
+      </div>
+
+      {/* Edit start date modal */}
+      {showEditStart&&(
+        <Overlay onClose={()=>setShowEditStart(false)} maxW={300}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:12}}>📅 Эхлэх огноо засах</div>
+          <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} style={INP}/>
+          <div style={{display:"flex",gap:7,marginTop:12}}>
+            <button onClick={()=>setShowEditStart(false)} style={bs("#fff","#333","#e0e0e0")}>Болих</button>
+            <button onClick={()=>{upd({enroll_date:startDate});setShowEditStart(false);}} style={{...bs(t.accent,"#fff"),flex:1,justifyContent:"center"}}>Хадгалах</button>
+          </div>
+        </Overlay>
+      )}
       <div style={{display:"flex",gap:6,marginBottom:14,background:t.soft,borderRadius:12,padding:4}}>
         {[["card","📋 Миний карт"],["leaderboard","🏆 Жагсаалт"]].map(item=>(
           <button key={item[0]} onClick={()=>setTab(item[0])} style={{flex:1,padding:"9px",borderRadius:9,border:"none",background:tab===item[0]?t.card:"transparent",color:tab===item[0]?t.accent:t.text,fontWeight:tab===item[0]?700:400,fontSize:12,cursor:"pointer"}}>{item[1]}</button>
@@ -862,7 +1236,7 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
             onToggleAtt={()=>{}} hideUI={false}
             setShowPay={()=>{}} setEditNotes={()=>{}} editNotes={false}
             notes={s.teacher_notes||""} setNotes={()=>{}}
-            weakSearch={""} setWeakSearch={()=>{}} showWeakDD={false} setShowWeakDD={()=>{}}/>
+            weakSearch={weakSearch} setWeakSearch={setWeakSearch} showWeakDD={showWeakDD} setShowWeakDD={setShowWeakDD}/>
         </div>
       )}
     </div>
@@ -1441,6 +1815,7 @@ function AdminPanel({students,setStudents,currentTeacherId,onClose}){
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:600,fontSize:13}}>{s.name}</div>
                 <div style={{fontSize:10,color:"#888"}}>{cls?.name||"—"} · {s.email||"—"}</div>
+                <div style={{fontSize:10,color:"#aaa"}}>РД: {s.rd||"—"}</div>
                 <div style={{fontSize:10,color:"#aaa",display:"flex",alignItems:"center",gap:4,marginTop:1}}>
                   🔑 <b style={{fontFamily:"monospace",color:pwVis?"#7c3aed":"#aaa"}}>{pwVis?curPw:"•".repeat(Math.min(8,curPw.length))}</b>
                   <span onClick={()=>setShowPwId(pwVis?null:s.id)} style={{cursor:"pointer",fontSize:12,opacity:.5}}>{pwVis?"🙈":"👁"}</span>
@@ -1736,48 +2111,51 @@ export default function App(){
   const [loading,setLoading]=useState(true);
   const [loadErr,setLoadErr]=useState(null);
 
-  useEffect(()=>{
-    async function loadAll(){
-      try{
-        const headers={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
-        const [r1,r2,r3,r4,r5,r6,r7]=await Promise.all([
-          fetch(`${SUPA_URL}/rest/v1/classes?select=*`,{headers}),
-          fetch(`${SUPA_URL}/rest/v1/students?select=*`,{headers}),
-          fetch(`${SUPA_URL}/rest/v1/badge_defs?select=*`,{headers}),
-          fetch(`${SUPA_URL}/rest/v1/vocab_entries?select=*`,{headers}),
-          fetch(`${SUPA_URL}/rest/v1/payments?select=*`,{headers}),
-          fetch(`${SUPA_URL}/rest/v1/pending_students?select=*`,{headers}),
-          fetch(`${SUPA_URL}/rest/v1/teachers?select=*`,{headers}),
-        ]);
-        const [cls,sts,bds,voc,pays,pends,tchs]=await Promise.all([r1.json(),r2.json(),r3.json(),r4.json(),r5.json(),r6.json(),r7.json()]);
-        _db.classes=cls||[];
-        _db.students=(sts||[]).map(s=>({
-          ...s,
-          badges:Array.isArray(s.badges)?s.badges:[],
-          weak_words:Array.isArray(s.weak_words)?s.weak_words:(s.weak_words?JSON.parse(s.weak_words):[]),
-          attendance:s.attendance&&typeof s.attendance==="object"?s.attendance:{},
-        }));
-        _db.vocab_entries=voc||[];
-        _db.payments=pays||[];
-        _db.badge_defs=bds||[];
-        _pending.length=0;
-        (pends||[]).forEach(p=>_pending.push(p));
-        // Teachers Supabase-аас ачаална
-        if(tchs&&tchs.length>0){
-          _teachers.length=0;
-          tchs.forEach(t=>_teachers.push(t));
-        }
-        setClasses([..._db.classes]);
-        setStudents([..._db.students]);
-        setBadgeDefs([..._db.badge_defs]);
-        setLoading(false);
-      }catch(e){
-        setLoadErr("Интернет холболт шалгана уу.");
-        setLoading(false);
-      }
+  const loadAll=useCallback(async()=>{
+    try{
+      const headers={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+      const [r1,r2,r3,r4,r5,r6,r7]=await Promise.all([
+        fetch(`${SUPA_URL}/rest/v1/classes?select=*`,{headers}),
+        fetch(`${SUPA_URL}/rest/v1/students?select=*`,{headers}),
+        fetch(`${SUPA_URL}/rest/v1/badge_defs?select=*`,{headers}),
+        fetch(`${SUPA_URL}/rest/v1/vocab_entries?select=*`,{headers}),
+        fetch(`${SUPA_URL}/rest/v1/payments?select=*`,{headers}),
+        fetch(`${SUPA_URL}/rest/v1/pending_students?select=*`,{headers}),
+        fetch(`${SUPA_URL}/rest/v1/teachers?select=*`,{headers}),
+      ]);
+      const [cls,sts,bds,voc,pays,pends,tchs]=await Promise.all([r1.json(),r2.json(),r3.json(),r4.json(),r5.json(),r6.json(),r7.json()]);
+      _db.classes=cls||[];
+      _db.students=(sts||[]).map(s=>({
+        ...s,
+        badges:Array.isArray(s.badges)?s.badges:[],
+        weak_words:Array.isArray(s.weak_words)?s.weak_words:(s.weak_words?JSON.parse(s.weak_words):[]),
+        attendance:s.attendance&&typeof s.attendance==="object"?s.attendance:{},
+      }));
+      _db.vocab_entries=voc||[];
+      _db.payments=pays||[];
+      _db.badge_defs=bds||[];
+      _pending.length=0;
+      (pends||[]).forEach(p=>_pending.push(p));
+      if(tchs&&tchs.length>0){_teachers.length=0;tchs.forEach(t=>_teachers.push(t));}
+      setClasses([..._db.classes]);
+      setStudents([..._db.students]);
+      setBadgeDefs([..._db.badge_defs]);
+      setLoadErr(null);
+      setLoading(false);
+    }catch(e){
+      if(loading)setLoadErr("Интернет холболт шалгана уу.");
+      setLoading(false);
     }
-    loadAll();
   },[]);
+
+  useEffect(()=>{
+    loadAll();
+    // Auto-refresh every 30 seconds
+    const interval=setInterval(()=>{
+      if(document.visibilityState==="visible") loadAll();
+    },30000);
+    return()=>clearInterval(interval);
+  },[loadAll]);
 
   const isTeacher=user?.role==="teacher";
   const isSuperAdmin=!!(user?.isSuperAdmin);
@@ -1845,6 +2223,7 @@ export default function App(){
               </button>
             )}
             {isSuperAdmin&&<button onClick={()=>setShowAdd(true)} style={bs("#7c3aed","#fff",undefined,true)}>+ Анги</button>}
+            <button onClick={()=>loadAll()} style={bs("#f0f0f0","#555","#e0e0e0",true)}>🔄</button>
             <button onClick={()=>setUser(null)} style={bs("#fff","#e53935","#ffcdd2",true)}>Гарах</button>
           </div>
         </div>
