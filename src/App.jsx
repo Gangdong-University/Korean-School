@@ -4,6 +4,49 @@ import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 const SUPA_URL = "https://ftmvhmsvrtownqrnvbzo.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0bXZobXN2cnRvd25xcm52YnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMjE5ODIsImV4cCI6MjA5NDU5Nzk4Mn0.TV0YMNDNRcjv8oVfekwjJYeMgHlix4c4J3l0CR2_HUI";
 
+// ── GLOBAL CSS ANIMATIONS (Duolingo маягийн) ──────────
+if(typeof document!=="undefined"&&!document.getElementById("k-anim")){
+  const style=document.createElement("style");
+  style.id="k-anim";
+  style.textContent=`
+    @keyframes kFadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes kSlideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes kSlideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+    @keyframes kPop{0%{transform:scale(0.92);opacity:0}60%{transform:scale(1.03);opacity:1}100%{transform:scale(1)}}
+    @keyframes kBounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+    @keyframes kShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
+    @keyframes kFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+    @keyframes kStretchUp{0%{transform:scaleY(0);transform-origin:bottom}100%{transform:scaleY(1);transform-origin:bottom}}
+    .k-fade{animation:kFadeIn .35s ease}
+    .k-slide{animation:kSlideUp .3s ease}
+    .k-pop{animation:kPop .35s cubic-bezier(0.34,1.56,0.64,1)}
+    .k-press{transition:transform .12s ease}
+    .k-press:active{transform:scale(0.94)}
+    .k-hover{transition:all .2s ease}
+    .k-hover:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,0.1)}
+    .k-card-hover{transition:all .2s ease;cursor:pointer}
+    .k-card-hover:hover{transform:translateY(-3px);box-shadow:0 8px 24px rgba(0,0,0,0.12)}
+    .k-bouncy{animation:kBounce 1s ease-in-out infinite}
+    .k-float{animation:kFloat 2s ease-in-out infinite}
+    button.k-btn{transition:transform .12s ease,box-shadow .15s ease,filter .15s ease}
+    button.k-btn:hover{filter:brightness(1.05)}
+    button.k-btn:active{transform:scale(0.96)}
+  `;
+  document.head.appendChild(style);
+}
+
+// Solongos audio (Web Speech API)
+const speakKr=(text)=>{
+  if(typeof window==="undefined"||!("speechSynthesis"in window))return;
+  try{
+    window.speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang="ko-KR";
+    u.rate=0.85;
+    window.speechSynthesis.speak(u);
+  }catch(e){console.warn("TTS error",e);}
+};
+
 const supa = {
   async from(table) {
     const base = `${SUPA_URL}/rest/v1/${table}`;
@@ -141,6 +184,7 @@ const TOPIK=["Pre-TOPIK","TOPIK I-1","TOPIK I-2","TOPIK II-3","TOPIK II-4","TOPI
 const WDAYS=["Ня","Да","Мя","Лх","Пү","Ба","Бя"];
 const DLABELS=["","Да","Мя","Лх","Пү","Ба","Бя","Ня"];
 const TODAY=new Date().toISOString().split("T")[0];
+const NOW_MONTH=new Date().toISOString().slice(0,7);
 const fmt=n=>Number(n||0).toLocaleString()+"₮";
 const getT=id=>THEMES.find(t=>t.id===id)||THEMES[0];
 const getLvl=xp=>[..._levels].reverse().find(l=>xp>=l.xp)||_levels[0];
@@ -665,6 +709,366 @@ function VocabTab({vocabEntries,t}){
     </div>
   );
 }
+
+// ── DAILY CALENDAR TAB ────────────────────────────────
+// Сурагч өдрөөр ангилсан үг, дүрмээ харах
+function DailyCalendarTab({vocabEntries,t,classDays}){
+  const [viewMonth,setViewMonth]=useState(NOW_MONTH);
+  const [selectedDate,setSelectedDate]=useState(TODAY);
+
+  const calData=useMemo(()=>{
+    const [y,m]=viewMonth.split("-").map(Number);
+    const firstDay=new Date(y,m-1,1);
+    const lastDay=new Date(y,m,0);
+    const dim=lastDay.getDate();
+    let startDow=firstDay.getDay();
+    startDow=startDow===0?6:startDow-1;
+    const days=[];
+    for(let i=0;i<startDow;i++)days.push(null);
+    for(let d=1;d<=dim;d++){
+      const dateStr=`${viewMonth}-${String(d).padStart(2,"0")}`;
+      // date багана байвал тэрийг ашиглана, эс бөгөөс month-ийн бүх эх хүснэгтийг өдрийн 1-нд харуулна
+      const dayItems=vocabEntries.filter(v=>{
+        if(v.date)return v.date===dateStr;
+        if(v.month===viewMonth&&d===1)return true;
+        return false;
+      });
+      const vocabs=dayItems.filter(v=>v.type==="vocab");
+      const grammars=dayItems.filter(v=>v.type==="grammar");
+      const dow=new Date(y,m-1,d).getDay();
+      const mappedDow=dow===0?7:dow;
+      const isLessonDay=(classDays||[]).includes(mappedDow);
+      days.push({day:d,date:dateStr,vocabs,grammars,total:dayItems.length,isLessonDay,isToday:dateStr===TODAY});
+    }
+    return days;
+  },[viewMonth,vocabEntries,classDays]);
+
+  const selectedItems=vocabEntries.filter(v=>{
+    if(v.date)return v.date===selectedDate;
+    if(selectedDate.endsWith("-01")&&v.month===selectedDate.slice(0,7))return true;
+    return false;
+  });
+  const selVocabs=selectedItems.filter(v=>v.type==="vocab");
+  const selGrammars=selectedItems.filter(v=>v.type==="grammar");
+
+  const changeMonth=(delta)=>{
+    const [y,m]=viewMonth.split("-").map(Number);
+    const d=new Date(y,m-1+delta,1);
+    setViewMonth(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+  };
+
+  const monthStats=useMemo(()=>{
+    const items=vocabEntries.filter(v=>{
+      if(v.date)return v.date.startsWith(viewMonth);
+      return v.month===viewMonth;
+    });
+    const dates=items.filter(v=>v.date).map(v=>v.date);
+    return{
+      vocab:items.filter(v=>v.type==="vocab").length,
+      grammar:items.filter(v=>v.type==="grammar").length,
+      days:[...new Set(dates)].length
+    };
+  },[viewMonth,vocabEntries]);
+
+  return(
+    <div className="k-fade" style={{background:t.card,borderRadius:18,padding:14,border:`2px solid ${t.border}`}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <button onClick={()=>changeMonth(-1)} className="k-btn k-press"
+          style={{background:t.soft,border:"none",borderRadius:10,padding:"6px 11px",cursor:"pointer",fontSize:14,color:t.accent,fontWeight:700}}>◀</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontWeight:800,fontSize:14,color:t.text}}>📅 {viewMonth}</div>
+          <div style={{fontSize:10,color:t.text,opacity:.55}}>{monthStats.vocab} үг · {monthStats.grammar} дүрэм{monthStats.days>0?` · ${monthStats.days} өдөр`:""}</div>
+        </div>
+        <button onClick={()=>changeMonth(1)} className="k-btn k-press"
+          style={{background:t.soft,border:"none",borderRadius:10,padding:"6px 11px",cursor:"pointer",fontSize:14,color:t.accent,fontWeight:700}}>▶</button>
+      </div>
+
+      {/* Calendar grid */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:14}}>
+        {["Да","Мя","Лх","Пү","Ба","Бя","Ня"].map(d=>(
+          <div key={d} style={{textAlign:"center",fontSize:10,fontWeight:700,color:t.text,opacity:.5,padding:4}}>{d}</div>
+        ))}
+        {calData.map((day,i)=>{
+          if(!day)return <div key={`empty-${i}`}/>;
+          const isSelected=day.date===selectedDate;
+          const hasContent=day.total>0;
+          let bg=t.card,col=t.text,opacity=.5;
+          if(day.isLessonDay&&!hasContent){bg=t.soft;col=t.text;opacity=.7;}
+          if(hasContent){bg=t.soft;col=t.accent;opacity=1;}
+          if(day.isToday){bg=t.accent;col="#fff";opacity=1;}
+          if(isSelected&&!day.isToday){bg=t.card;col=t.accent;}
+          return(
+            <div key={day.date} onClick={()=>setSelectedDate(day.date)} className="k-press"
+              style={{aspectRatio:"1",borderRadius:9,background:bg,
+                border:isSelected?`2px solid ${t.accent}`:`1px solid ${t.border}`,
+                display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+                cursor:"pointer",position:"relative",transition:"all .2s ease",
+                transform:isSelected?"scale(1.05)":"none",
+                boxShadow:day.isToday?`0 3px 10px ${t.accent}66`:isSelected?`0 2px 8px ${t.accent}44`:"none",
+                opacity}}>
+              <span style={{fontSize:12,fontWeight:hasContent?800:600,color:col}}>{day.day}</span>
+              {hasContent&&(
+                <div style={{display:"flex",gap:2,marginTop:1}}>
+                  {day.vocabs.length>0&&<div style={{width:4,height:4,borderRadius:"50%",background:day.isToday?"#fff":t.accent}}/>}
+                  {day.grammars.length>0&&<div style={{width:4,height:4,borderRadius:"50%",background:day.isToday?"#fff":"#7c3aed"}}/>}
+                </div>
+              )}
+              {hasContent&&day.total>0&&(
+                <div style={{position:"absolute",top:1,right:2,fontSize:8,fontWeight:800,
+                  background:day.isToday?"rgba(255,255,255,.3)":t.accent,
+                  color:"#fff",borderRadius:6,padding:"0 4px",lineHeight:1.3}}>{day.total}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Selected day detail */}
+      <div key={selectedDate} className="k-slide" style={{background:t.soft,borderRadius:14,padding:13}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:9}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:1,color:t.accent,opacity:.7,textTransform:"uppercase"}}>
+              {selectedDate===TODAY?"📍 Өнөөдөр":"📅 Сонгосон өдөр"}
+            </div>
+            <div style={{fontWeight:800,fontSize:15,color:t.text}}>{fmtDate(selectedDate)}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:11,fontWeight:700,color:t.accent}}>{selVocabs.length} үг</div>
+            <div style={{fontSize:11,fontWeight:700,color:"#7c3aed"}}>{selGrammars.length} дүрэм</div>
+          </div>
+        </div>
+
+        {selVocabs.length===0&&selGrammars.length===0&&(
+          <div style={{textAlign:"center",padding:"20px 0",color:t.text,opacity:.45,fontSize:13}}>
+            <div style={{fontSize:30,marginBottom:6,opacity:.5}}>🌙</div>
+            Тухайн өдөр шинэ зүйл үзээгүй
+          </div>
+        )}
+
+        {selVocabs.length>0&&(
+          <div style={{marginBottom:selGrammars.length>0?10:0}}>
+            <div style={{fontSize:11,fontWeight:800,color:t.accent,marginBottom:6,display:"flex",alignItems:"center",gap:5}}>
+              📚 Үгс <span style={{background:t.card,borderRadius:8,padding:"1px 7px",fontSize:10}}>{selVocabs.length}</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
+              {selVocabs.map((v,i)=>(
+                <div key={v.id} onClick={()=>speakKr(v.word)} className="k-press"
+                  style={{background:t.card,borderRadius:10,padding:"7px 10px",
+                    borderLeft:`3px solid ${t.accent}`,cursor:"pointer",
+                    animation:`kSlideIn .3s ease ${i*0.04}s both`,
+                    transition:"transform .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.transform="translateX(3px)"}
+                  onMouseLeave={e=>e.currentTarget.style.transform="none"}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div style={{fontWeight:800,fontSize:14,color:t.text}}>{v.word}</div>
+                    <span style={{fontSize:10,opacity:.5}}>🔊</span>
+                  </div>
+                  <div style={{fontSize:10,color:t.text,opacity:.6,marginTop:1}}>{v.meaning}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selGrammars.length>0&&(
+          <div>
+            <div style={{fontSize:11,fontWeight:800,color:"#7c3aed",marginBottom:6,display:"flex",alignItems:"center",gap:5}}>
+              📖 Дүрэм <span style={{background:t.card,borderRadius:8,padding:"1px 7px",fontSize:10}}>{selGrammars.length}</span>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              {selGrammars.map((v,i)=>(
+                <div key={v.id}
+                  style={{background:"#f5f0ff",borderRadius:10,padding:"8px 11px",
+                    border:"1px solid #d4b8ff",
+                    animation:`kSlideIn .3s ease ${(selVocabs.length+i)*0.04}s both`,
+                    transition:"transform .15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.transform="translateX(3px)"}
+                  onMouseLeave={e=>e.currentTarget.style.transform="none"}>
+                  <div style={{fontWeight:800,fontSize:14,color:"#7c3aed"}}>{v.word}</div>
+                  <div style={{fontSize:10,color:"#555",marginTop:1}}>{v.meaning}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── TOAST ──────────────────────────────────────────────
+function Toast({msg,type,onDone}){
+  useEffect(()=>{
+    if(!msg)return;
+    const t=setTimeout(onDone,2500);
+    return()=>clearTimeout(t);
+  },[msg,onDone]);
+  if(!msg)return null;
+  const colors={success:["#43a047","#fff"],error:["#e53935","#fff"],info:["#1976d2","#fff"],warning:["#f57c00","#fff"]};
+  const [bg,col]=colors[type||"success"]||colors.success;
+  return(
+    <div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:bg,color:col,padding:"12px 22px",borderRadius:12,fontWeight:700,fontSize:13,boxShadow:"0 8px 24px rgba(0,0,0,0.2)",zIndex:9999,animation:"kSlideUp .3s ease",maxWidth:"90vw"}}>
+      {msg}
+    </div>
+  );
+}
+
+// ── BULK ATTENDANCE — НЭГ ДОРООС ИРЦ АВАХ ─────────────
+// Багш бүх сурагчдын ирцийг тухайн өдрөөр нэг дороос авах
+function BulkAttendance({students,classDays,setStudents,onClose,onToast}){
+  const [date,setDate]=useState(TODAY);
+  const [saving,setSaving]=useState(false);
+  // Тухайн өдөр ирсэн сурагчдын ID-ийн жагсаалт
+  const [present,setPresent]=useState(()=>{
+    const s=new Set();
+    students.forEach(st=>{if((st.attendance||{})[date])s.add(st.id);});
+    return s;
+  });
+
+  // Огноо өөрчлөгдөхөд present-ийг шинэчлэх
+  useEffect(()=>{
+    const s=new Set();
+    students.forEach(st=>{if((st.attendance||{})[date])s.add(st.id);});
+    setPresent(s);
+  },[date,students]);
+
+  // Сонгосон өдөр хичээлийн өдөр уу гэдгийг шалгах
+  const isLessonDay=useMemo(()=>{
+    if(!classDays||!classDays.length)return true;
+    const dow=new Date(date).getDay();
+    const mapped=dow===0?7:dow;
+    return classDays.includes(mapped);
+  },[date,classDays]);
+
+  const toggle=(sid)=>{
+    setPresent(prev=>{
+      const next=new Set(prev);
+      if(next.has(sid))next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
+  };
+
+  const allOn=()=>setPresent(new Set(students.map(s=>s.id)));
+  const allOff=()=>setPresent(new Set());
+
+  const save=async()=>{
+    setSaving(true);
+    const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"};
+    const updates=[];
+    for(const st of students){
+      const prevAtt=(st.attendance||{})[date]||false;
+      const newAtt=present.has(st.id);
+      if(prevAtt===newAtt)continue;
+      const att={...(st.attendance||{}),[date]:newAtt};
+      // Ирц шинээр тэмдэглэвэл +20 XP
+      const xpDelta=newAtt&&!prevAtt?20:(!newAtt&&prevAtt?-20:0);
+      const patch={attendance:att,xp:Math.max(0,(st.xp||0)+xpDelta)};
+      _db.students=_db.students.map(x=>x.id===st.id?{...x,...patch}:x);
+      updates.push({id:st.id,...patch});
+      // Supabase patch
+      try{
+        await fetch(`${SUPA_URL}/rest/v1/students?id=eq.${st.id}`,{method:"PATCH",headers:h,body:JSON.stringify(patch)});
+      }catch(e){console.error("Att sync err",e);}
+    }
+    if(updates.length>0){
+      setStudents(prev=>prev.map(s=>{
+        const u=updates.find(x=>x.id===s.id);
+        return u?{...s,...u}:s;
+      }));
+      onToast&&onToast(`✅ ${updates.length} сурагчийн ирц шинэчлэгдлээ`);
+    }else{
+      onToast&&onToast("ℹ️ Өөрчлөлт байхгүй","info");
+    }
+    setSaving(false);
+    onClose();
+  };
+
+  return(
+    <Overlay onClose={onClose} maxW={440}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+        <div>
+          <div style={{fontWeight:800,fontSize:16,color:"#1a1a2e"}}>📋 Хурдан ирц</div>
+          <div style={{fontSize:11,color:"#888",marginTop:2}}>Нэг дороос ирц тэмдэглэх</div>
+        </div>
+      </div>
+
+      {/* Date picker */}
+      <div style={{background:"#f0f0ff",borderRadius:12,padding:"10px 12px",marginBottom:12}}>
+        <div style={{fontSize:11,color:"#7c3aed",fontWeight:700,marginBottom:4}}>📅 Огноо</div>
+        <input type="date" value={date} onChange={e=>setDate(e.target.value)} max={TODAY}
+          style={{...INP,fontSize:13,padding:"7px 10px",background:"#fff",fontWeight:600}}/>
+        {!isLessonDay&&(
+          <div style={{fontSize:11,color:"#e65100",marginTop:6}}>⚠️ Энэ өдөр хичээлгүй (зөвхөн ангийн өдрөөр сонгох зөв)</div>
+        )}
+      </div>
+
+      {/* Bulk actions */}
+      <div style={{display:"flex",gap:6,marginBottom:10}}>
+        <button onClick={allOn} className="k-btn k-press" style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>✓ Бүгд ирсэн</button>
+        <button onClick={allOff} className="k-btn k-press" style={bs("#fce4ec","#c62828","#f48fb1",true)}>✗ Цэвэрлэх</button>
+        <div style={{flex:1,textAlign:"right",alignSelf:"center",fontSize:12,fontWeight:700,color:"#7c3aed"}}>
+          {present.size}/{students.length}
+        </div>
+      </div>
+
+      {/* Student list */}
+      <div style={{maxHeight:"45vh",overflowY:"auto",marginBottom:14,marginLeft:-4,marginRight:-4}}>
+        {students.length===0?(
+          <div style={{textAlign:"center",padding:"30px 0",color:"#aaa",fontSize:13}}>Сурагч байхгүй</div>
+        ):(
+          students.map(st=>{
+            const t2=getT(st.theme_id);
+            const isOn=present.has(st.id);
+            return(
+              <div key={st.id} onClick={()=>toggle(st.id)} className="k-press"
+                style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:11,marginBottom:6,
+                  background:isOn?"#e8f5e9":"#fafafa",
+                  border:isOn?"2px solid #66bb6a":"2px solid #eee",
+                  cursor:"pointer",transition:"all .15s"}}>
+                {/* Avatar */}
+                <div style={{width:36,height:36,borderRadius:"50%",overflow:"hidden",
+                  border:`2px solid ${t2.accent}`,background:t2.soft,
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,flexShrink:0}}>
+                  {st.photo_url?<img src={st.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t2.emoji}
+                </div>
+                {/* Name */}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:600,fontSize:13,color:"#1a1a2e",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.name}</div>
+                  <div style={{fontSize:10,color:"#888",marginTop:1}}>
+                    {TOPIK[st.level||0]} · ⚡{st.xp||0}
+                  </div>
+                </div>
+                {/* Toggle */}
+                <div style={{
+                  width:28,height:28,borderRadius:"50%",flexShrink:0,
+                  background:isOn?"#43a047":"#fff",
+                  border:isOn?"2px solid #43a047":"2px solid #ddd",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:14,color:"#fff",fontWeight:800,
+                  transition:"all .15s",
+                  boxShadow:isOn?"0 3px 8px rgba(67,160,71,0.3)":"none"}}>
+                  {isOn?"✓":""}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Save button */}
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={onClose} className="k-btn" style={{...bs("#fff","#333","#e0e0e0"),flex:1,justifyContent:"center"}}>Болих</button>
+        <button onClick={save} disabled={saving} className="k-btn k-press"
+          style={{...bs("#2e7d32","#fff"),flex:2,justifyContent:"center",fontWeight:800,opacity:saving?.6:1}}>
+          {saving?"⏳ Хадгалж байна...":`✅ Хадгалах (${present.size})`}
+        </button>
+      </div>
+    </Overlay>
+  );
+}
+
 function AuthScreen({onAuth}){
   const [mode,setMode]=useState("teacher");
   const [email,setEmail]=useState("");
@@ -791,128 +1195,344 @@ function AuthScreen({onAuth}){
   });
 
   if(regDone) return(
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#667eea,#764ba2)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",padding:16}}>
-      <div style={{background:"#fff",borderRadius:24,padding:32,width:"100%",maxWidth:340,textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
-        <div style={{fontSize:48,marginBottom:12}}>⏳</div>
-        <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Бүртгэл илгээгдлээ!</div>
-        <div style={{fontSize:13,color:"#555",marginBottom:20,lineHeight:1.6}}>Багш таны бүртгэлийг зөвшөөрсний дараа нэвтрэх боломжтой болно.<br/><b style={{color:"#7c3aed"}}>{email}</b></div>
-        <button onClick={()=>{setRegDone(false);setMode("student");clearForm();}} style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700}}>← Нэвтрэх хуудас руу</button>
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#81c784 0%,#43a047 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",padding:16,position:"relative",overflow:"hidden"}}>
+      {/* Floating background emoji */}
+      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+        {[
+          {e:"🌱",x:10,y:20,size:40,delay:0,dur:6},
+          {e:"🍀",x:85,y:15,size:36,delay:1,dur:5},
+          {e:"🌿",x:80,y:75,size:42,delay:2,dur:7},
+          {e:"✨",x:15,y:80,size:28,delay:0.5,dur:8},
+          {e:"🎉",x:75,y:45,size:34,delay:1.5,dur:6},
+          {e:"🌟",x:20,y:50,size:30,delay:3,dur:5},
+        ].map((p,i)=>(
+          <div key={i} style={{position:"absolute",left:`${p.x}%`,top:`${p.y}%`,fontSize:p.size,opacity:.5,animation:`kFloat ${p.dur}s ease-in-out ${p.delay}s infinite`,filter:"drop-shadow(0 4px 8px rgba(0,0,0,0.1))"}}>{p.e}</div>
+        ))}
+      </div>
+      <div className="k-pop" style={{background:"#fff",borderRadius:28,padding:"36px 28px",width:"100%",maxWidth:360,textAlign:"center",boxShadow:"0 24px 80px rgba(0,0,0,.25)",position:"relative",zIndex:1}}>
+        <div className="k-bouncy" style={{fontSize:72,marginBottom:14,display:"inline-block",filter:"drop-shadow(0 8px 16px rgba(67,160,71,0.3))"}}>🎉</div>
+        <div style={{fontSize:22,fontWeight:900,color:"#2e7d32",marginBottom:10}}>Бүртгэл амжилттай!</div>
+        <div style={{fontSize:13,color:"#555",marginBottom:8,lineHeight:1.6}}>
+          Багш таны бүртгэлийг<br/>зөвшөөрсний дараа<br/>нэвтрэх боломжтой болно.
+        </div>
+        <div style={{background:"linear-gradient(135deg,#e8f5e9,#c8e6c9)",border:"2px dashed #66bb6a",borderRadius:14,padding:"12px 16px",marginBottom:22,fontSize:13,color:"#2e7d32",fontWeight:700,wordBreak:"break-all"}}>
+          📧 {email}
+        </div>
+        <button onClick={()=>{setRegDone(false);setMode("student");clearForm();}} className="k-btn k-press"
+          style={{...bs("#43a047","#fff"),width:"100%",justifyContent:"center",padding:"14px",fontWeight:800,fontSize:14,boxShadow:"0 4px 0 #2e7d32",letterSpacing:.5}}>
+          ← Нэвтрэх хуудас руу
+        </button>
       </div>
     </div>
   );
 
+  // ── KAWAII INPUT STYLE ─────────────────────────────
+  const kInp={
+    width:"100%",
+    padding:"13px 16px",
+    borderRadius:14,
+    border:"2px solid #e9e3ff",
+    fontSize:14,
+    outline:"none",
+    boxSizing:"border-box",
+    background:"#faf8ff",
+    transition:"all .2s ease",
+    fontWeight:500,
+  };
+  const kLabel={fontSize:11,color:"#7c3aed",fontWeight:700,marginBottom:5,letterSpacing:.5,textTransform:"uppercase"};
+
+  // Mode-аас хамаарсан өнгө
+  const modeColors={
+    teacher:{primary:"#7c3aed",secondary:"#a78bfa",bg1:"#a78bfa",bg2:"#7c3aed",emoji:"👩‍🏫",title:"Багшийн нэвтрэх",sub:"Та өөрийн ангиа удирдана"},
+    student:{primary:"#e91e8c",secondary:"#f48cb1",bg1:"#f48cb1",bg2:"#e91e8c",emoji:"🌸",title:"Сурагч нэвтрэх",sub:"Өнөөдрийн хичээлээ хүлээж байна!"},
+    register:{primary:"#43a047",secondary:"#81c784",bg1:"#81c784",bg2:"#43a047",emoji:"🌱",title:"Шинээр эхэлье!",sub:"Солонгос хэлний аялалд тавтай морил"},
+    forgot:{primary:"#f57c00",secondary:"#ffb74d",bg1:"#ffb74d",bg2:"#f57c00",emoji:"🔑",title:"Нууц үг сэргээх",sub:"Бүү ай — туслана!"},
+  };
+  const mc=modeColors[mode]||modeColors.student;
+
   return(
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#667eea,#764ba2)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",padding:16}}>
-      <div style={{background:"#fff",borderRadius:24,padding:28,width:"100%",maxWidth:340,boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}>
-        <div style={{textAlign:"center",marginBottom:18}}>
-          <div style={{fontSize:38,marginBottom:4}}>🏫</div>
-          <div style={{fontSize:19,fontWeight:800,color:"#1a1a2e"}}>한국어 학원</div>
-        </div>
-        <div style={{display:"flex",gap:5,marginBottom:18,background:"#f0f0f0",borderRadius:12,padding:4}}>
-          {[["teacher","👩‍🏫 Багш"],["student","🎓 Нэвтрэх"],["register","✏️ Бүртгүүлэх"]].map(item=>(
-            <button key={item[0]} onClick={()=>{setMode(item[0]);clearForm();}} style={tabStyle(item[0])}>{item[1]}</button>
-          ))}
+    <div style={{
+      minHeight:"100vh",
+      background:`linear-gradient(135deg,${mc.bg1} 0%,${mc.bg2} 100%)`,
+      display:"flex",alignItems:"center",justifyContent:"center",
+      fontFamily:"system-ui",padding:16,
+      position:"relative",overflow:"hidden",
+      transition:"background 0.6s ease",
+    }}>
+      {/* ── Хөвөгч background эмодиго ── */}
+      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+        {[
+          {e:"🌸",x:8,y:15,size:40,delay:0,dur:6},
+          {e:"⭐",x:85,y:10,size:28,delay:1,dur:5},
+          {e:"🌟",x:90,y:60,size:34,delay:2,dur:7},
+          {e:"🍀",x:5,y:75,size:32,delay:0.5,dur:8},
+          {e:"💫",x:75,y:85,size:30,delay:1.5,dur:6},
+          {e:"✨",x:15,y:45,size:24,delay:3,dur:5},
+          {e:"🎀",x:80,y:40,size:26,delay:2.5,dur:7},
+          {e:"📚",x:20,y:88,size:30,delay:0.8,dur:6.5},
+          {e:"한",x:50,y:8,size:48,delay:1.2,dur:9},
+          {e:"국",x:55,y:92,size:42,delay:2.8,dur:8},
+        ].map((p,i)=>(
+          <div key={i} style={{
+            position:"absolute",
+            left:`${p.x}%`,top:`${p.y}%`,
+            fontSize:p.size,
+            opacity:p.e==="한"||p.e==="국"?0.25:0.45,
+            color:p.e==="한"||p.e==="국"?"#fff":"inherit",
+            fontWeight:p.e==="한"||p.e==="국"?900:400,
+            animation:`kFloat ${p.dur}s ease-in-out ${p.delay}s infinite`,
+            filter:"drop-shadow(0 4px 8px rgba(0,0,0,0.1))",
+            userSelect:"none",
+          }}>{p.e}</div>
+        ))}
+        {/* Том blur тойргууд */}
+        <div style={{position:"absolute",top:"-10%",right:"-10%",width:300,height:300,borderRadius:"50%",background:"rgba(255,255,255,0.15)",filter:"blur(40px)",animation:"kFloat 10s ease-in-out infinite"}}/>
+        <div style={{position:"absolute",bottom:"-15%",left:"-10%",width:350,height:350,borderRadius:"50%",background:"rgba(255,255,255,0.12)",filter:"blur(50px)",animation:"kFloat 12s ease-in-out 2s infinite"}}/>
+      </div>
+
+      {/* ── Main card ── */}
+      <div className="k-pop" style={{
+        background:"#fff",
+        borderRadius:28,
+        padding:"28px 26px",
+        width:"100%",maxWidth:380,
+        boxShadow:"0 24px 80px rgba(0,0,0,.25), 0 0 0 1px rgba(255,255,255,0.5) inset",
+        position:"relative",zIndex:1,
+        backdropFilter:"blur(20px)",
+      }}>
+        {/* ── Header — mascot + title ── */}
+        <div style={{textAlign:"center",marginBottom:20,position:"relative"}}>
+          {/* Mascot */}
+          <div className="k-bouncy" style={{
+            fontSize:64,
+            marginBottom:6,
+            display:"inline-block",
+            filter:"drop-shadow(0 8px 16px rgba(0,0,0,0.15))",
+            transition:"all 0.4s ease",
+          }}>{mc.emoji}</div>
+          {/* Sparkle */}
+          <div style={{position:"absolute",top:5,right:"30%",fontSize:18,animation:"kFloat 3s ease-in-out infinite",opacity:.8}}>✨</div>
+          <div style={{position:"absolute",top:25,left:"28%",fontSize:14,animation:"kFloat 2.5s ease-in-out 0.5s infinite",opacity:.7}}>⭐</div>
+          
+          <div style={{
+            fontSize:24,fontWeight:900,
+            background:`linear-gradient(135deg,${mc.primary},${mc.secondary})`,
+            WebkitBackgroundClip:"text",
+            WebkitTextFillColor:"transparent",
+            backgroundClip:"text",
+            letterSpacing:-.5,
+          }}>한국어 학원</div>
+          <div style={{fontSize:11,color:"#888",fontWeight:600,marginTop:2,letterSpacing:1}}>КАНДУН СОЛОНГОС ХЭЛНИЙ СУРГУУЛЬ</div>
         </div>
 
+        {/* ── Mode title ── */}
+        <div className="k-fade" key={mode} style={{textAlign:"center",marginBottom:18}}>
+          <div style={{fontSize:16,fontWeight:800,color:mc.primary,marginBottom:2}}>{mc.title}</div>
+          <div style={{fontSize:11,color:"#888"}}>{mc.sub}</div>
+        </div>
+
+        {/* ── Tab selector — Дуолинго маягийн ── */}
+        <div style={{display:"flex",gap:4,marginBottom:18,background:"#f5f3ff",borderRadius:14,padding:5,position:"relative"}}>
+          {[["teacher","👩‍🏫","Багш"],["student","🎓","Сурагч"],["register","✏️","Бүртгүүлэх"]].map(item=>{
+            const active=mode===item[0];
+            return(
+              <button key={item[0]} onClick={()=>{setMode(item[0]);clearForm();}} className="k-btn k-press"
+                style={{
+                  flex:1,padding:"9px 4px",borderRadius:10,border:"none",
+                  background:active?"#fff":"transparent",
+                  color:active?mc.primary:"#888",
+                  fontWeight:active?800:600,
+                  fontSize:11,cursor:"pointer",
+                  display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                  boxShadow:active?`0 2px 8px ${mc.primary}33`:"none",
+                  transition:"all .2s",
+                }}>
+                <span style={{fontSize:16}}>{item[1]}</span>
+                <span>{item[2]}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── FORGOT PASSWORD ── */}
         {mode==="forgot"&&(
-          <div>
+          <div className="k-fade">
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-              <button onClick={()=>{setMode("student");clearForm();}} style={bs("#f0f0f0","#555",undefined,true)}>← Буцах</button>
-              <span style={{fontWeight:700,fontSize:14}}>🔑 Нууц үг мартсан</span>
+              <button onClick={()=>{setMode("student");clearForm();}} className="k-btn k-press" style={bs("#f0f0f0","#555",undefined,true)}>← Буцах</button>
+              <span style={{fontWeight:800,fontSize:14,color:"#f57c00"}}>🔑 Нууц үг сэргээх</span>
             </div>
             {fResult?(
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:32,marginBottom:8}}>✅</div>
-                <div style={{fontSize:13,color:"#555",marginBottom:6}}>Сайн байна уу, <b>{fResult.name}</b>!</div>
+              <div className="k-pop" style={{textAlign:"center"}}>
+                <div style={{fontSize:48,marginBottom:8}}>🎉</div>
+                <div style={{fontSize:14,color:"#555",marginBottom:6}}>Сайн байна уу, <b>{fResult.name}</b>!</div>
                 <div style={{fontSize:12,color:"#888",marginBottom:8}}>Таны нууц үг:</div>
-                <div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",background:"#f0f0ff",borderRadius:10,padding:"10px 16px",color:"#7c3aed",letterSpacing:2,marginBottom:16}}>{fResult.password}</div>
-                <button onClick={()=>{setMode("student");clearForm();}} style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",padding:"11px",fontWeight:700}}>Нэвтрэх →</button>
+                <div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",background:"linear-gradient(135deg,#fff8e1,#fff3cd)",border:"2px solid #ffd54f",borderRadius:14,padding:"12px 18px",color:"#b8860b",letterSpacing:3,marginBottom:18}}>{fResult.password}</div>
+                <button onClick={()=>{setMode("student");clearForm();}} className="k-btn k-press" style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"13px",fontWeight:800,boxShadow:"0 4px 0 #ad1457",fontSize:14}}>Нэвтрэх →</button>
               </div>
             ):(
               <div>
-                <div style={{fontSize:12,color:"#888",marginBottom:12}}>И-мэйл болон Регистрийн дугаараа оруулна уу.</div>
-                <div style={{marginBottom:10}}>
-                  <div style={{fontSize:12,color:"#888",marginBottom:3}}>И-мэйл</div>
-                  <input type="email" value={fEmail} onChange={e=>setFEmail(e.target.value)} placeholder="taны@email.com" style={INP}/>
+                <div style={{fontSize:12,color:"#888",marginBottom:14,textAlign:"center",lineHeight:1.5}}>И-мэйл болон Регистрийн дугаараа<br/>оруулна уу 👇</div>
+                <div style={{marginBottom:12}}>
+                  <div style={kLabel}>📧 И-мэйл</div>
+                  <input type="email" value={fEmail} onChange={e=>setFEmail(e.target.value)} placeholder="taны@email.com"
+                    onFocus={e=>e.target.style.borderColor=mc.primary}
+                    onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                    style={kInp}/>
                 </div>
-                <div style={{marginBottom:16}}>
-                  <div style={{fontSize:12,color:"#888",marginBottom:3}}>Регистрийн дугаар (РД)</div>
-                  <input value={fRd} onChange={e=>setFRd(e.target.value.toUpperCase())} placeholder="УБ123456" style={{...INP,textTransform:"uppercase",letterSpacing:2,fontWeight:700}}/>
+                <div style={{marginBottom:18}}>
+                  <div style={kLabel}>🆔 Регистрийн дугаар</div>
+                  <input value={fRd} onChange={e=>setFRd(e.target.value.toUpperCase())} placeholder="УБ12345678"
+                    onFocus={e=>e.target.style.borderColor=mc.primary}
+                    onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                    style={{...kInp,textTransform:"uppercase",letterSpacing:2,fontWeight:700}}/>
                 </div>
-                <button onClick={forgotCheck} style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700}}>Нууц үг харах</button>
+                <button onClick={forgotCheck} className="k-btn k-press"
+                  style={{...bs(mc.primary,"#fff"),width:"100%",justifyContent:"center",padding:"14px",fontWeight:800,fontSize:14,boxShadow:`0 4px 0 ${mc.bg2}`,letterSpacing:.5}}>
+                  🔓 Нууц үг харах
+                </button>
               </div>
             )}
           </div>
         )}
 
+        {/* ── TEACHER LOGIN ── */}
         {mode==="teacher"&&(
-          <div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:12,color:"#888",marginBottom:3}}>И-мэйл</div>
-              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginTeacher()} style={INP}/>
+          <div className="k-fade">
+            <div style={{marginBottom:12}}>
+              <div style={kLabel}>📧 И-мэйл</div>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginTeacher()} placeholder="admin@school.mn"
+                onFocus={e=>e.target.style.borderColor="#7c3aed"}
+                onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                style={kInp}/>
             </div>
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:12,color:"#888",marginBottom:3}}>Нууц үг</div>
+            <div style={{marginBottom:18}}>
+              <div style={kLabel}>🔒 Нууц үг</div>
               <div style={{position:"relative"}}>
-                <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginTeacher()} style={{...INP,paddingRight:38}}/>
-                <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:14,opacity:.5}}>{showPass?"🙈":"👁"}</span>
+                <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginTeacher()} placeholder="••••••••"
+                  onFocus={e=>e.target.style.borderColor="#7c3aed"}
+                  onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                  style={{...kInp,paddingRight:42}}/>
+                <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:16,opacity:.6}}>{showPass?"🙈":"👁"}</span>
               </div>
             </div>
-            <button onClick={loginTeacher} disabled={loading2} style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700,opacity:loading2?.7:1}}>{loading2?"⏳ Нэвтрэж байна...":"Нэвтрэх"}</button>
+            <button onClick={loginTeacher} disabled={loading2} className="k-btn k-press"
+              style={{...bs("#7c3aed","#fff"),width:"100%",justifyContent:"center",padding:"14px",fontWeight:800,fontSize:14,opacity:loading2?.7:1,boxShadow:"0 4px 0 #5b21b6",letterSpacing:.5}}>
+              {loading2?"⏳ Нэвтрэж байна...":"🚀 Багш болгож нэвтрэх"}
+            </button>
           </div>
         )}
 
+        {/* ── STUDENT LOGIN ── */}
         {mode==="student"&&(
-          <div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:12,color:"#888",marginBottom:3}}>И-мэйл</div>
-              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginStudent()} style={INP}/>
+          <div className="k-fade">
+            <div style={{marginBottom:12}}>
+              <div style={kLabel}>📧 И-мэйл</div>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginStudent()} placeholder="таны@email.com"
+                onFocus={e=>e.target.style.borderColor="#e91e8c"}
+                onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                style={kInp}/>
             </div>
             <div style={{marginBottom:6}}>
-              <div style={{fontSize:12,color:"#888",marginBottom:3}}>Нууц үг</div>
+              <div style={kLabel}>🔒 Нууц үг</div>
               <div style={{position:"relative"}}>
-                <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginStudent()} style={{...INP,paddingRight:38}}/>
-                <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:14,opacity:.5}}>{showPass?"🙈":"👁"}</span>
+                <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} onKeyDown={e=>e.key==="Enter"&&loginStudent()} placeholder="••••••••"
+                  onFocus={e=>e.target.style.borderColor="#e91e8c"}
+                  onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                  style={{...kInp,paddingRight:42}}/>
+                <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:16,opacity:.6}}>{showPass?"🙈":"👁"}</span>
               </div>
             </div>
-            <div style={{textAlign:"right",marginBottom:14}}>
-              <span onClick={()=>{setMode("forgot");clearForm();}} style={{fontSize:11,color:"#7c3aed",cursor:"pointer",fontWeight:600}}>Нууц үгээ мартсан уу?</span>
+            <div style={{textAlign:"right",marginBottom:16,marginTop:6}}>
+              <span onClick={()=>{setMode("forgot");clearForm();}} style={{fontSize:11,color:"#e91e8c",cursor:"pointer",fontWeight:700,padding:"4px 8px",borderRadius:6,transition:"all .15s"}}
+                onMouseEnter={e=>e.target.style.background="#fce4ec"}
+                onMouseLeave={e=>e.target.style.background="transparent"}>
+                🤔 Нууц үгээ мартсан уу?
+              </span>
             </div>
-            <button onClick={loginStudent} disabled={loading2} style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700,opacity:loading2?.7:1}}>{loading2?"⏳ Нэвтрэж байна...":"Нэвтрэх"}</button>
-            <div style={{marginTop:10,textAlign:"center",fontSize:11,color:"#aaa"}}>
-              Бүртгэл байхгүй юу? <span onClick={()=>{setMode("register");clearForm();}} style={{color:"#7c3aed",cursor:"pointer",fontWeight:600}}>Бүртгүүлэх</span>
+            <button onClick={loginStudent} disabled={loading2} className="k-btn k-press"
+              style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"14px",fontWeight:800,fontSize:14,opacity:loading2?.7:1,boxShadow:"0 4px 0 #ad1457",letterSpacing:.5}}>
+              {loading2?"⏳ Нэвтрэж байна...":"🌸 Хичээлээ үргэлжлүүлэх"}
+            </button>
+            <div style={{marginTop:14,textAlign:"center",fontSize:12,color:"#888",padding:"10px",borderTop:"1px dashed #eee"}}>
+              Шинэ сурагч уу?{" "}
+              <span onClick={()=>{setMode("register");clearForm();}} style={{color:"#43a047",cursor:"pointer",fontWeight:800,padding:"3px 7px",borderRadius:6}}
+                onMouseEnter={e=>e.target.style.background="#e8f5e9"}
+                onMouseLeave={e=>e.target.style.background="transparent"}>
+                🌱 Шинээр эхлэх →
+              </span>
             </div>
           </div>
         )}
 
+        {/* ── REGISTER ── */}
         {mode==="register"&&(
-          <div>
-            {[["Нэр *","text",name,setName,"Бүтэн нэр"],["И-мэйл *","email",email,setEmail,"taны@email.com"],["РД *","text",rd,v=>setRd(v.toUpperCase()),"УБ123456"],["Утас","tel",phone,setPhone,"+976 9999-9999"]].map(item=>(
-              <div key={item[0]} style={{marginBottom:9}}>
-                <div style={{fontSize:12,color:"#888",marginBottom:3}}>{item[0]}</div>
-                <input type={item[1]} value={item[2]} onChange={e=>item[3](e.target.value)} placeholder={item[4]}
-                  style={{...INP,...(item[0]==="РД *"?{textTransform:"uppercase",letterSpacing:2,fontWeight:700}:{})}}/>
+          <div className="k-fade">
+            {[
+              {label:"👤 Нэр",key:"name",type:"text",val:name,set:setName,ph:"Бүтэн нэрээ оруулна уу"},
+              {label:"📧 И-мэйл",key:"email",type:"email",val:email,set:setEmail,ph:"таны@email.com"},
+              {label:"🆔 Регистрийн дугаар",key:"rd",type:"text",val:rd,set:v=>setRd(v.toUpperCase()),ph:"УБ12345678",upper:true},
+              {label:"📞 Утас (заавал биш)",key:"phone",type:"tel",val:phone,set:setPhone,ph:"+976 9999-9999"},
+            ].map(item=>(
+              <div key={item.key} style={{marginBottom:10}}>
+                <div style={kLabel}>{item.label}</div>
+                <input type={item.type} value={item.val} onChange={e=>item.set(e.target.value)} placeholder={item.ph}
+                  onFocus={e=>e.target.style.borderColor="#43a047"}
+                  onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                  style={{...kInp,...(item.upper?{textTransform:"uppercase",letterSpacing:2,fontWeight:700}:{})}}/>
               </div>
             ))}
-            <div style={{marginBottom:9}}>
-              <div style={{fontSize:12,color:"#888",marginBottom:3}}>Нууц үг *</div>
+            <div style={{marginBottom:10}}>
+              <div style={kLabel}>🔒 Нууц үг</div>
               <div style={{position:"relative"}}>
-                <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} style={{...INP,paddingRight:38}}/>
-                <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:14,opacity:.5}}>{showPass?"🙈":"👁"}</span>
+                <input type={showPass?"text":"password"} value={pass} onChange={e=>setPass(e.target.value)} placeholder="хамгийн багадаа 6 тэмдэгт"
+                  onFocus={e=>e.target.style.borderColor="#43a047"}
+                  onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                  style={{...kInp,paddingRight:42}}/>
+                <span onClick={()=>setShowPass(p=>!p)} style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)",cursor:"pointer",fontSize:16,opacity:.6}}>{showPass?"🙈":"👁"}</span>
               </div>
             </div>
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:12,color:"#888",marginBottom:3}}>Нууц үг давтах *</div>
-              <input type="password" value={confirmPass} onChange={e=>setConfirmPass(e.target.value)} style={INP}/>
+            <div style={{marginBottom:18}}>
+              <div style={kLabel}>🔒 Нууц үг давтах</div>
+              <input type="password" value={confirmPass} onChange={e=>setConfirmPass(e.target.value)} placeholder="дахин бичнэ үү"
+                onFocus={e=>e.target.style.borderColor="#43a047"}
+                onBlur={e=>e.target.style.borderColor="#e9e3ff"}
+                style={kInp}/>
             </div>
-            <button onClick={register} style={{...bs("#e91e8c","#fff"),width:"100%",justifyContent:"center",padding:"12px",fontWeight:700}}>Бүртгүүлэх</button>
-            <div style={{marginTop:10,textAlign:"center",fontSize:11,color:"#aaa"}}>
-              Бүртгэл байгаа юу? <span onClick={()=>{setMode("student");clearForm();}} style={{color:"#7c3aed",cursor:"pointer",fontWeight:600}}>Нэвтрэх</span>
+            <button onClick={register} className="k-btn k-press"
+              style={{...bs("#43a047","#fff"),width:"100%",justifyContent:"center",padding:"14px",fontWeight:800,fontSize:14,boxShadow:"0 4px 0 #2e7d32",letterSpacing:.5}}>
+              🌱 Бүртгүүлэх
+            </button>
+            <div style={{marginTop:14,textAlign:"center",fontSize:12,color:"#888",padding:"10px",borderTop:"1px dashed #eee"}}>
+              Хэдийнэ бүртгэлтэй юу?{" "}
+              <span onClick={()=>{setMode("student");clearForm();}} style={{color:"#e91e8c",cursor:"pointer",fontWeight:800,padding:"3px 7px",borderRadius:6}}
+                onMouseEnter={e=>e.target.style.background="#fce4ec"}
+                onMouseLeave={e=>e.target.style.background="transparent"}>
+                🌸 Нэвтрэх →
+              </span>
             </div>
           </div>
         )}
 
-        {err&&<div style={{marginTop:10,padding:"8px 12px",background:"#fce4ec",borderRadius:8,fontSize:12,color:"#c62828"}}>{err}</div>}
+        {/* ── ERROR ── */}
+        {err&&(
+          <div className="k-pop" style={{
+            marginTop:14,padding:"12px 16px",
+            background:"linear-gradient(135deg,#fce4ec,#ffe0e0)",
+            border:"2px solid #f48fb1",
+            borderRadius:12,
+            fontSize:12,color:"#c62828",
+            fontWeight:600,
+            display:"flex",alignItems:"center",gap:8,
+          }}>
+            <span style={{fontSize:18}}>😢</span>
+            <span style={{flex:1}}>{err}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Footer ── */}
+      <div style={{position:"absolute",bottom:14,left:0,right:0,textAlign:"center",fontSize:11,color:"rgba(255,255,255,0.7)",fontWeight:600,zIndex:1,letterSpacing:.5}}>
+        화이팅! 🌸 Амжилт хүсье!
       </div>
     </div>
   );
@@ -1495,12 +2115,19 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
           </div>
         </Overlay>
       )}
-      <div style={{display:"flex",gap:6,marginBottom:14,background:t.soft,borderRadius:12,padding:4}}>
-        {[["card","📋 Карт"],["vocab","📚 Үгс"],["weak","⚠️ Эргэлзэж"],["leaderboard","🏆 Жагсаалт"]].map(item=>(
-          <button key={item[0]} onClick={()=>setTab(item[0])} style={{flex:1,padding:"8px 2px",borderRadius:9,border:"none",background:tab===item[0]?t.card:"transparent",color:tab===item[0]?t.accent:t.text,fontWeight:tab===item[0]?700:400,fontSize:10,cursor:"pointer"}}>{item[1]}</button>
+      <div style={{display:"flex",gap:5,marginBottom:14,background:t.soft,borderRadius:12,padding:4}}>
+        {[["card","📋"],["daily","📅"],["vocab","📚"],["weak","⚠️"],["leaderboard","🏆"]].map(item=>(
+          <button key={item[0]} onClick={()=>setTab(item[0])} className="k-press"
+            style={{flex:1,padding:"9px 2px",borderRadius:9,border:"none",
+              background:tab===item[0]?t.card:"transparent",
+              color:tab===item[0]?t.accent:t.text,
+              fontWeight:tab===item[0]?700:500,
+              fontSize:16,cursor:"pointer",transition:"all .15s",
+              boxShadow:tab===item[0]?`0 2px 8px ${t.accent}33`:"none"}}>{item[1]}</button>
         ))}
       </div>
-      {tab==="leaderboard"&&<div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}><div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div><Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/></div>}
+      {tab==="daily"&&<DailyCalendarTab vocabEntries={vocabEntries} t={t} classDays={classDays}/>}
+      {tab==="leaderboard"&&<div className="k-fade" style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}><div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div><Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/></div>}
       {tab==="vocab"&&<VocabTab vocabEntries={vocabEntries} t={t}/>}
       {tab==="weak"&&(
         <div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}>
@@ -2156,6 +2783,7 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
   const [showVocab,setShowVocab]=useState(false);
   const [classDays,setClassDays]=useState(cls.days||[]);
   const [vocabMonth,setVocabMonth]=useState(attMonth);
+  const [vocabDate,setVocabDate]=useState(TODAY);
   const [vocabType,setVocabType]=useState("vocab");
   const [vocabWord,setVocabWord]=useState("");
   const [vocabMean,setVocabMean]=useState("");
@@ -2163,6 +2791,9 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
   const [tick,setTick]=useState(0);
   const [showPayReport,setShowPayReport]=useState(false);
   const [confirmDelCls,setConfirmDelCls]=useState(false);
+  const [showBulkAtt,setShowBulkAtt]=useState(false);
+  const [toast,setToast]=useState(null);
+  const showToast=(msg,type)=>setToast({msg,type:type||"success"});
 
   const vocabEntries=_db.vocab_entries.filter(v=>v.class_id===cls.id);
 
@@ -2177,10 +2808,13 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
 
   const addVocabEntry=async()=>{
     if(!vocabWord.trim())return;
-    const newVocab={id:`ve${Date.now()}`,class_id:cls.id,month:vocabMonth,word:vocabWord.trim(),meaning:vocabMean.trim(),type:vocabType};
+    const monthFromDate=vocabDate.slice(0,7);
+    const newVocab={id:`ve${Date.now()}`,class_id:cls.id,month:monthFromDate,date:vocabDate,word:vocabWord.trim(),meaning:vocabMean.trim(),type:vocabType};
     _db.vocab_entries.push(newVocab);
     const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json","Prefer":"return=representation"};
-    await fetch(`${SUPA_URL}/rest/v1/vocab_entries`,{method:"POST",headers:h,body:JSON.stringify(newVocab)});
+    try{
+      await fetch(`${SUPA_URL}/rest/v1/vocab_entries`,{method:"POST",headers:h,body:JSON.stringify(newVocab)});
+    }catch(e){console.warn("Vocab sync err",e);}
     if(vocabType==="grammar"){
       _db.students.filter(s=>s.class_id===cls.id).forEach(s=>{
         _db.students=_db.students.map(x=>x.id===s.id?{...x,grammar_total:(x.grammar_total||0)+1,grammar_learned:(x.grammar_learned||0)+1}:x);
@@ -2188,6 +2822,7 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
       setStudents(prev=>prev.map(s=>s.class_id!==cls.id?s:{...s,grammar_total:(s.grammar_total||0)+1,grammar_learned:(s.grammar_learned||0)+1}));
     }
     setVocabWord("");setVocabMean("");setTick(t=>t+1);
+    showToast(`✅ ${vocabType==="vocab"?"Үг":"Дүрэм"} нэмэгдлээ`);
   };
 
   const printVocabPDF=()=>{
@@ -2230,14 +2865,28 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
           </div>
           {isAdmin&&(
             <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              <button onClick={()=>setShowVocab(v=>!v)} style={bs("#fff3cd","#b8860b","#f9a825",true)}>{showVocab?"✕":"📚"}</button>
-              <button onClick={printVocabPDF} style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>🖨️</button>
-              {isSuperAdmin&&<button onClick={()=>setShowPayReport(true)} style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>💰</button>}
-              <button onClick={()=>setShowAddSt(true)} style={bs(cls.color,"#fff",undefined,true)}>+ Нэмэх</button>
-              {isSuperAdmin&&<button onClick={()=>setConfirmDelCls(true)} style={bs("#fff0f0","#e53935","#ffcdd2",true)}>🗑️</button>}
+              <button onClick={()=>setShowBulkAtt(true)} className="k-btn k-press" style={{...bs("#43a047","#fff",undefined,true),fontWeight:700,boxShadow:"0 3px 0 #2e7d32"}}>✅ Ирц авах</button>
+              <button onClick={()=>setShowVocab(v=>!v)} className="k-btn k-press" style={bs("#fff3cd","#b8860b","#f9a825",true)}>{showVocab?"✕":"📚"}</button>
+              <button onClick={printVocabPDF} className="k-btn k-press" style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>🖨️</button>
+              {isSuperAdmin&&<button onClick={()=>setShowPayReport(true)} className="k-btn k-press" style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>💰</button>}
+              <button onClick={()=>setShowAddSt(true)} className="k-btn k-press" style={bs(cls.color,"#fff",undefined,true)}>+ Нэмэх</button>
+              {isSuperAdmin&&<button onClick={()=>setConfirmDelCls(true)} className="k-btn k-press" style={bs("#fff0f0","#e53935","#ffcdd2",true)}>🗑️</button>}
             </div>
           )}
         </div>
+
+        {/* Bulk Attendance modal */}
+        {showBulkAtt&&(
+          <BulkAttendance
+            students={students}
+            classDays={classDays}
+            setStudents={setStudents}
+            onClose={()=>setShowBulkAtt(false)}
+            onToast={showToast}/>
+        )}
+
+        {/* Toast */}
+        <Toast msg={toast?.msg} type={toast?.type} onDone={()=>setToast(null)}/>
 
         {/* Days editor */}
         {isAdmin&&(
@@ -2255,18 +2904,61 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
 
         {/* Vocab panel */}
         {showVocab&&(
-          <div style={{background:"#fff",borderRadius:14,padding:14,marginBottom:14,border:"1px solid #f0e0ff"}}>
-            <div style={{fontWeight:700,fontSize:14,marginBottom:10,color:"#7c3aed"}}>📚 Үг / Дүрэм нэмэх</div>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
-              <input type="month" value={vocabMonth} onChange={e=>setVocabMonth(e.target.value)} style={{...INP,width:"auto",fontSize:12,padding:"5px 9px"}}/>
-              <button onClick={()=>setVocabType("vocab")} style={bs(vocabType==="vocab"?"#7c3aed":"#f0f0f0",vocabType==="vocab"?"#fff":"#333",undefined,true)}>📚 Үг</button>
-              <button onClick={()=>setVocabType("grammar")} style={bs(vocabType==="grammar"?"#2e7d32":"#f0f0f0",vocabType==="grammar"?"#fff":"#333",undefined,true)}>📖 Дүрэм</button>
+          <div className="k-fade" style={{background:"#fff",borderRadius:14,padding:14,marginBottom:14,border:"2px solid #e1d5ff",boxShadow:"0 4px 16px rgba(124,58,237,0.08)"}}>
+            <div style={{fontWeight:800,fontSize:15,marginBottom:10,color:"#7c3aed",display:"flex",alignItems:"center",gap:6}}>📚 Үг / Дүрэм нэмэх</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
+              <div style={{display:"flex",alignItems:"center",gap:5,background:"#f5f0ff",borderRadius:9,padding:"2px 4px 2px 9px"}}>
+                <span style={{fontSize:11,color:"#7c3aed",fontWeight:700}}>📅</span>
+                <input type="date" value={vocabDate} max={TODAY} onChange={e=>setVocabDate(e.target.value)} 
+                  style={{...INP,width:"auto",fontSize:12,padding:"5px 8px",border:"none",background:"transparent",fontWeight:700,color:"#7c3aed"}}/>
+                <button onClick={()=>setVocabDate(TODAY)} className="k-btn k-press" title="Өнөөдөр" style={{...bs("#fff","#7c3aed","#d4b8ff",true),padding:"3px 8px"}}>Өнөөдөр</button>
+              </div>
+              <button onClick={()=>setVocabType("vocab")} className="k-btn k-press" style={bs(vocabType==="vocab"?"#7c3aed":"#f0f0f0",vocabType==="vocab"?"#fff":"#333",undefined,true)}>📚 Үг</button>
+              <button onClick={()=>setVocabType("grammar")} className="k-btn k-press" style={bs(vocabType==="grammar"?"#2e7d32":"#f0f0f0",vocabType==="grammar"?"#fff":"#333",undefined,true)}>📖 Дүрэм</button>
             </div>
             <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-              <input value={vocabWord} onChange={e=>setVocabWord(e.target.value)} placeholder="한국어" style={{...INP,flex:2,fontSize:12,padding:"6px 9px"}} onKeyDown={e=>e.key==="Enter"&&addVocabEntry()}/>
-              <input value={vocabMean} onChange={e=>setVocabMean(e.target.value)} placeholder="Монгол утга" style={{...INP,flex:2,fontSize:12,padding:"6px 9px"}} onKeyDown={e=>e.key==="Enter"&&addVocabEntry()}/>
-              <button onClick={addVocabEntry} style={bs("#7c3aed","#fff",undefined,true)}>+</button>
+              <input value={vocabWord} onChange={e=>setVocabWord(e.target.value)} placeholder="한국어" style={{...INP,flex:2,fontSize:14,padding:"8px 10px",fontWeight:600,minWidth:120}} onKeyDown={e=>e.key==="Enter"&&addVocabEntry()}/>
+              <input value={vocabMean} onChange={e=>setVocabMean(e.target.value)} placeholder="Монгол утга" style={{...INP,flex:2,fontSize:13,padding:"8px 10px",minWidth:120}} onKeyDown={e=>e.key==="Enter"&&addVocabEntry()}/>
+              <button onClick={addVocabEntry} className="k-btn k-press" style={{...bs("#7c3aed","#fff",undefined,true),fontWeight:800,padding:"8px 16px",boxShadow:"0 3px 0 #5b21b6"}}>+ Нэмэх</button>
             </div>
+            {(() => {
+              // өдрөөр болон сараар бүлэглэх
+              const grouped={};
+              vocabEntries.forEach(v=>{
+                const key=v.date||v.month||"unknown";
+                if(!grouped[key])grouped[key]=[];
+                grouped[key].push(v);
+              });
+              const keys=Object.keys(grouped).sort().reverse();
+              return keys.map(key=>(
+                <div key={key} style={{marginBottom:8,paddingBottom:6,borderBottom:"1px solid #f0f0f0"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:"#7c3aed",marginBottom:4}}>📅 {key.length===10?fmtDate(key):key}</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                    {grouped[key].map(v=>(
+                      <div key={v.id} style={{display:"flex",alignItems:"center",gap:4,background:v.type==="vocab"?"#f3e8ff":"#e8f5e9",border:`1px solid ${v.type==="vocab"?"#a78bfa":"#66bb6a"}`,borderRadius:8,padding:"3px 8px",fontSize:11,transition:"transform .15s"}}
+                        onMouseEnter={e=>e.currentTarget.style.transform="scale(1.04)"}
+                        onMouseLeave={e=>e.currentTarget.style.transform="none"}>
+                        <span style={{fontWeight:700}}>{v.word}</span>
+                        {v.meaning&&<span style={{opacity:.65,fontSize:10}}>{v.meaning}</span>}
+                        <span onClick={async()=>{
+                          _db.vocab_entries=_db.vocab_entries.filter(x=>x.id!==v.id);
+                          await fetch(`${SUPA_URL}/rest/v1/vocab_entries?id=eq.${v.id}`,{method:"DELETE",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
+                          setTick(t=>t+1);
+                          showToast("🗑️ Устгагдлаа","info");
+                        }} style={{cursor:"pointer",opacity:.4,fontSize:11,marginLeft:2}}
+                          onMouseEnter={e=>e.target.style.opacity="1"}
+                          onMouseLeave={e=>e.target.style.opacity=".4"}>✕</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+        {/* HIDDEN — хуучин vocab list (доорх .filter блокыг засаагүй учир compatibility-д үлдээв) */}
+        {false&&showVocab&&(
+          <div>
             {[...new Set(vocabEntries.map(v=>v.month))].sort().reverse().map(mo=>(
               <div key={mo} style={{marginBottom:8,paddingBottom:6,borderBottom:"1px solid #f0f0f0"}}>
                 <div style={{fontSize:11,fontWeight:600,color:"#7c3aed",marginBottom:4}}>📅 {mo}</div>
@@ -2493,18 +3185,38 @@ export default function App(){
   const visibleClasses=isTeacher?(isSuperAdmin?classes:classes.filter(c=>(user.class_ids||[]).includes(c.id))):[];
 
   if(loading)return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",background:"linear-gradient(135deg,#667eea,#764ba2)"}}>
-      <div style={{fontSize:48,marginBottom:16}}>🏫</div>
-      <div style={{fontSize:18,fontWeight:700,color:"#fff",marginBottom:8}}>한국어 학원</div>
-      <div style={{fontSize:13,color:"rgba(255,255,255,.8)"}}>Ачаалж байна...</div>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",background:"linear-gradient(135deg,#a78bfa 0%,#7c3aed 100%)",position:"relative",overflow:"hidden"}}>
+      {/* Floating background */}
+      <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+        {["🌸","⭐","✨","💫","🌟"].map((e,i)=>(
+          <div key={i} style={{position:"absolute",left:`${10+i*20}%`,top:`${20+(i%2)*50}%`,fontSize:30+i*3,opacity:.3,animation:`kFloat ${5+i}s ease-in-out ${i*0.3}s infinite`}}>{e}</div>
+        ))}
+      </div>
+      <div className="k-bouncy" style={{fontSize:72,marginBottom:16,filter:"drop-shadow(0 8px 16px rgba(0,0,0,0.2))"}}>🏫</div>
+      <div style={{fontSize:24,fontWeight:900,color:"#fff",marginBottom:8,letterSpacing:-.5}}>한국어 학원</div>
+      <div style={{fontSize:13,color:"rgba(255,255,255,.9)",fontWeight:600,letterSpacing:1}}>Ачаалж байна...</div>
+      {/* Loading dots */}
+      <div style={{display:"flex",gap:6,marginTop:14}}>
+        {[0,1,2].map(i=>(
+          <div key={i} style={{
+            width:10,height:10,borderRadius:"50%",background:"#fff",
+            animation:`kBounce 1s ease-in-out ${i*0.15}s infinite`,
+            boxShadow:"0 2px 6px rgba(0,0,0,0.15)"
+          }}/>
+        ))}
+      </div>
     </div>
   );
 
   if(loadErr)return(
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",padding:20,textAlign:"center"}}>
-      <div style={{fontSize:40,marginBottom:12}}>⚠️</div>
-      <div style={{fontSize:16,fontWeight:700,marginBottom:8}}>{loadErr}</div>
-      <button onClick={()=>window.location.reload()} style={{padding:"10px 24px",background:"#7c3aed",color:"#fff",border:"none",borderRadius:10,fontSize:14,cursor:"pointer",marginTop:8}}>Дахин оролдох</button>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",padding:20,textAlign:"center",background:"linear-gradient(135deg,#ffebee,#fff)"}}>
+      <div className="k-bouncy" style={{fontSize:64,marginBottom:14}}>😢</div>
+      <div style={{fontSize:18,fontWeight:800,marginBottom:8,color:"#c62828"}}>{loadErr}</div>
+      <div style={{fontSize:12,color:"#888",marginBottom:18}}>Дахин оролдоод үзээрэй</div>
+      <button onClick={()=>window.location.reload()} className="k-btn k-press"
+        style={{padding:"13px 28px",background:"#e53935",color:"#fff",border:"none",borderRadius:12,fontSize:14,cursor:"pointer",fontWeight:800,boxShadow:"0 4px 0 #c62828",letterSpacing:.5}}>
+        🔄 Дахин оролдох
+      </button>
     </div>
   );
 
@@ -2513,12 +3225,21 @@ export default function App(){
   if(user.role==="student"){
     const s=students.find(x=>x.id===user.id)||_db.students.find(x=>x.id===user.id);
     if(!s){
-      // Өгөгдөл ачаалагдаагүй байна — дахин хайна
       return(
-        <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",background:"linear-gradient(135deg,#667eea,#764ba2)"}}>
-          <div style={{fontSize:40,marginBottom:12}}>🏫</div>
-          <div style={{fontSize:14,fontWeight:600,color:"#fff",marginBottom:8}}>Мэдээлэл ачаалж байна...</div>
-          <div style={{fontSize:12,color:"rgba(255,255,255,.7)"}}>Түр хүлээнэ үү</div>
+        <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",background:"linear-gradient(135deg,#f48cb1 0%,#e91e8c 100%)",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
+            {["🌸","💖","✨"].map((e,i)=>(
+              <div key={i} style={{position:"absolute",left:`${15+i*30}%`,top:`${25+(i%2)*40}%`,fontSize:36,opacity:.4,animation:`kFloat ${5+i}s ease-in-out infinite`}}>{e}</div>
+            ))}
+          </div>
+          <div className="k-bouncy" style={{fontSize:64,marginBottom:14}}>🌸</div>
+          <div style={{fontSize:18,fontWeight:800,color:"#fff",marginBottom:6}}>Мэдээлэл ачаалж байна...</div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,.85)",fontWeight:600}}>Түр хүлээнэ үү</div>
+          <div style={{display:"flex",gap:6,marginTop:14}}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{width:9,height:9,borderRadius:"50%",background:"#fff",animation:`kBounce 1s ease-in-out ${i*0.15}s infinite`}}/>
+            ))}
+          </div>
         </div>
       );
     }
@@ -2544,56 +3265,125 @@ export default function App(){
   }
 
   return(
-    <div style={{minHeight:"100vh",background:"#f8f9ff",fontFamily:"system-ui",padding:16,overflowX:"hidden",boxSizing:"border-box"}}>
-      <div style={{maxWidth:720,margin:"0 auto"}}>
+    <div style={{minHeight:"100vh",background:"linear-gradient(180deg,#f8f9ff 0%,#fff 200px)",fontFamily:"system-ui",padding:16,overflowX:"hidden",boxSizing:"border-box"}}>
+      <div style={{maxWidth:840,margin:"0 auto"}}>
+        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
           <div>
-            <div style={{fontSize:21,fontWeight:800,color:"#1a1a2e"}}>🏫 한국어 학원</div>
-            <div style={{fontSize:12,color:"#888",display:"flex",alignItems:"center",gap:6}}>
+            <div style={{fontSize:23,fontWeight:800,color:"#1a1a2e"}}>🏫 한국어 학원</div>
+            <div style={{fontSize:12,color:"#888",display:"flex",alignItems:"center",gap:6,marginTop:2}}>
               {user.displayName} 👋
-              {isSuperAdmin&&<span style={{background:"#f0f0ff",color:"#7c3aed",borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>Super Admin</span>}
-              {!isSuperAdmin&&<span style={{background:"#f0fff4",color:"#2e7d32",borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>Багш</span>}
+              {isSuperAdmin&&<span style={{background:"#f0f0ff",color:"#7c3aed",borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:700}}>Super Admin</span>}
+              {!isSuperAdmin&&<span style={{background:"#f0fff4",color:"#2e7d32",borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:700}}>Багш</span>}
             </div>
           </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
             {isSuperAdmin&&(
-              <button onClick={()=>setShowAccounts(true)} style={{...bs("#f0f0ff","#7c3aed","#c5b8ff",true),position:"relative"}}>
+              <button onClick={()=>setShowAccounts(true)} className="k-btn k-press" style={{...bs("#f0f0ff","#7c3aed","#c5b8ff",true),position:"relative"}}>
                 🔑 Бүртгэл
-                {_pending.length>0&&<span style={{background:"#e53935",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:10,marginLeft:4}}>{_pending.length}</span>}
+                {_pending.length>0&&<span style={{background:"#e53935",color:"#fff",borderRadius:10,padding:"1px 6px",fontSize:10,marginLeft:4,fontWeight:800}}>{_pending.length}</span>}
               </button>
             )}
-            {isSuperAdmin&&<button onClick={()=>setShowAdd(true)} style={bs("#7c3aed","#fff",undefined,true)}>+ Анги</button>}
-            <button onClick={()=>loadAll()} style={bs("#f0f0f0","#555","#e0e0e0",true)}>🔄</button>
-            <button onClick={()=>setUser(null)} style={bs("#fff","#e53935","#ffcdd2",true)}>Гарах</button>
+            {isSuperAdmin&&<button onClick={()=>setShowAdd(true)} className="k-btn k-press" style={bs("#7c3aed","#fff",undefined,true)}>+ Анги</button>}
+            <button onClick={()=>loadAll()} className="k-btn k-press" style={bs("#f0f0f0","#555","#e0e0e0",true)}>🔄</button>
+            <button onClick={()=>setUser(null)} className="k-btn k-press" style={bs("#fff","#e53935","#ffcdd2",true)}>Гарах</button>
           </div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
-          {visibleClasses.map(cls=>{
+        {/* Өнөөдрийн тойм (Today's overview) */}
+        {(()=>{
+          const todayDow=new Date().getDay();
+          const mapped=todayDow===0?7:todayDow;
+          const todayClasses=visibleClasses.filter(c=>(c.days||[]).includes(mapped));
+          const allStudents=isSuperAdmin?students:students.filter(s=>visibleClasses.some(c=>c.id===s.class_id));
+          const overdue=isSuperAdmin?allStudents.filter(s=>s.next_due&&s.next_due<TODAY&&(s.total_paid||0)<(s.total_fee||0)):[];
+          const totalDue=overdue.reduce((sum,s)=>sum+((s.total_fee||0)-(s.total_paid||0)),0);
+          return(
+            <div className="k-fade" style={{background:"#fff",borderRadius:18,padding:16,marginBottom:16,border:"1px solid #f0f0f0",boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
+              <div style={{fontWeight:800,fontSize:14,color:"#1a1a2e",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
+                📊 Өнөөдрийн тойм <span style={{fontSize:11,color:"#888",fontWeight:500}}>· {fmtDate(TODAY)}</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
+                {/* Өнөөдрийн анги */}
+                <div style={{background:"#f5f0ff",borderRadius:12,padding:"10px 12px",borderLeft:"3px solid #7c3aed"}}>
+                  <div style={{fontSize:10,color:"#7c3aed",fontWeight:700,marginBottom:2}}>📚 ӨНӨӨДӨР</div>
+                  <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e"}}>{todayClasses.length} анги</div>
+                  <div style={{fontSize:10,color:"#666",marginTop:1}}>
+                    {todayClasses.length>0?todayClasses.map(c=>c.name).join(", "):"Хичээл байхгүй"}
+                  </div>
+                </div>
+                {/* Нийт сурагч */}
+                <div style={{background:"#e8f5e9",borderRadius:12,padding:"10px 12px",borderLeft:"3px solid #2e7d32"}}>
+                  <div style={{fontSize:10,color:"#2e7d32",fontWeight:700,marginBottom:2}}>👥 СУРАГЧ</div>
+                  <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e"}}>{allStudents.length}</div>
+                  <div style={{fontSize:10,color:"#666",marginTop:1}}>{visibleClasses.length} ангид</div>
+                </div>
+                {/* Төлбөр (зөвхөн superadmin) */}
+                {isSuperAdmin&&(
+                  <div style={{background:overdue.length>0?"#fce4ec":"#e8f5e9",borderRadius:12,padding:"10px 12px",borderLeft:`3px solid ${overdue.length>0?"#c62828":"#2e7d32"}`}}>
+                    <div style={{fontSize:10,color:overdue.length>0?"#c62828":"#2e7d32",fontWeight:700,marginBottom:2}}>💰 ХОЦОРСОН</div>
+                    <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e"}}>{overdue.length} хүн</div>
+                    <div style={{fontSize:10,color:overdue.length>0?"#c62828":"#666",marginTop:1}}>
+                      {overdue.length>0?fmt(totalDue):"Бүх төлбөр цаг хугацаандаа"}
+                    </div>
+                  </div>
+                )}
+                {/* Pending (зөвхөн superadmin) */}
+                {isSuperAdmin&&_pending.length>0&&(
+                  <div style={{background:"#fff3cd",borderRadius:12,padding:"10px 12px",borderLeft:"3px solid #f9a825",cursor:"pointer"}}
+                    onClick={()=>setShowAccounts(true)} className="k-press">
+                    <div style={{fontSize:10,color:"#b8860b",fontWeight:700,marginBottom:2}}>⏳ ХҮЛЭЭГДЭЖ</div>
+                    <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e"}}>{_pending.length}</div>
+                    <div style={{fontSize:10,color:"#b8860b",marginTop:1}}>Бүртгэл зөвшөөрөх</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Анги жагсаалт */}
+        <div style={{fontWeight:700,fontSize:14,color:"#555",marginBottom:8,marginLeft:4}}>📚 Миний ангиуд</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
+          {visibleClasses.map((cls,idx)=>{
             const cs=students.filter(s=>s.class_id===cls.id);
+            const todayDow=new Date().getDay();
+            const mapped=todayDow===0?7:todayDow;
+            const isToday=(cls.days||[]).includes(mapped);
             return(
-              <div key={cls.id} onClick={()=>setSelCls(cls.id)}
-                style={{background:"#fff",borderRadius:18,padding:16,cursor:"pointer",boxShadow:"0 3px 14px #0001",borderTop:`4px solid ${cls.color}`,transition:"transform .15s"}}
-                onMouseEnter={e=>e.currentTarget.style.transform="translateY(-3px)"}
-                onMouseLeave={e=>e.currentTarget.style.transform="none"}>
-                <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e",marginBottom:2}}>{cls.name}</div>
-                <div style={{fontSize:11,color:"#888",marginBottom:8}}>🕐 {cls.time} · {(cls.days||[]).map(d=>DLABELS[d]).join(", ")}</div>
+              <div key={cls.id} onClick={()=>setSelCls(cls.id)} className="k-card-hover"
+                style={{background:"#fff",borderRadius:18,padding:16,boxShadow:"0 3px 14px #0001",borderTop:`4px solid ${cls.color}`,position:"relative",animation:`kSlideUp .35s ease ${idx*0.05}s both`}}>
+                {isToday&&(
+                  <div style={{position:"absolute",top:10,right:10,background:cls.color,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 8px",borderRadius:10}}>📍 ӨНӨӨДӨР</div>
+                )}
+                <div style={{fontWeight:800,fontSize:16,color:"#1a1a2e",marginBottom:3,paddingRight:isToday?70:0}}>{cls.name}</div>
+                <div style={{fontSize:11,color:"#888",marginBottom:10,display:"flex",alignItems:"center",gap:4}}>
+                  🕐 {cls.time}
+                  <span style={{opacity:.5}}>·</span>
+                  {(cls.days||[]).map(d=>(
+                    <span key={d} style={{background:isToday&&d===mapped?cls.color:"#f0f0f0",color:isToday&&d===mapped?"#fff":"#666",borderRadius:5,padding:"1px 5px",fontSize:10,fontWeight:600}}>{DLABELS[d]}</span>
+                  ))}
+                </div>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-                  {cs.map(s=>{
+                  {cs.slice(0,8).map(s=>{
                     const t2=getT(s.theme_id);
                     return(
-                      <div key={s.id} style={{width:30,height:30,borderRadius:"50%",overflow:"hidden",border:`2px solid ${cls.color}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>
+                      <div key={s.id} title={s.name} style={{width:30,height:30,borderRadius:"50%",overflow:"hidden",border:`2px solid ${cls.color}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>
                         {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t2.emoji}
                       </div>
                     );
                   })}
-                  <span style={{fontSize:11,color:"#aaa",marginLeft:2}}>{cs.length}</span>
+                  {cs.length>8&&(
+                    <div style={{width:30,height:30,borderRadius:"50%",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#666"}}>+{cs.length-8}</div>
+                  )}
+                  <span style={{fontSize:11,color:"#888",marginLeft:"auto",fontWeight:600}}>👥 {cs.length}</span>
                 </div>
               </div>
             );
           })}
           {visibleClasses.length===0&&(
-            <div style={{gridColumn:"1/-1",textAlign:"center",padding:"40px 20px",color:"#aaa",fontSize:14}}>
+            <div style={{gridColumn:"1/-1",textAlign:"center",padding:"40px 20px",color:"#aaa",fontSize:14,background:"#fff",borderRadius:14}}>
+              <div style={{fontSize:40,marginBottom:8,opacity:.4}}>📚</div>
               Танд оноогдсон анги байхгүй байна.
             </div>
           )}
