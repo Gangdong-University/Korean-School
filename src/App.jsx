@@ -17,6 +17,7 @@ if(typeof document!=="undefined"&&!document.getElementById("k-anim")){
     @keyframes kShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}
     @keyframes kFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
     @keyframes kStretchUp{0%{transform:scaleY(0);transform-origin:bottom}100%{transform:scaleY(1);transform-origin:bottom}}
+    @keyframes kSpinSlow{from{transform:rotate(0)}to{transform:rotate(360deg)}}
     .k-fade{animation:kFadeIn .35s ease}
     .k-slide{animation:kSlideUp .3s ease}
     .k-pop{animation:kPop .35s cubic-bezier(0.34,1.56,0.64,1)}
@@ -46,6 +47,150 @@ const speakKr=(text)=>{
     window.speechSynthesis.speak(u);
   }catch(e){console.warn("TTS error",e);}
 };
+
+// ── GEMINI AI HELPERS ─────────────────────────────────
+// Vercel api/gemini.js endpoint-той ажиллана
+// Environment-аас GEMINI_API_KEY уншина (Vercel-д тохируулна)
+const GEMINI_ENDPOINT = "/api/gemini";
+
+async function geminiCall(prompt, opts = {}) {
+  try {
+    const r = await fetch(GEMINI_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        system: opts.system,
+        json: opts.json || false,
+      }),
+    });
+    if (!r.ok) {
+      const errData = await r.json().catch(() => ({}));
+      throw new Error(errData.error || `Gemini error: ${r.status}`);
+    }
+    const data = await r.json();
+    return data.text || "";
+  } catch (e) {
+    console.error("Gemini call error:", e);
+    throw e;
+  }
+}
+
+// Солонгос үг → Монгол утга орчуулга
+async function translateKrToMn(koreanWord) {
+  const word = (koreanWord || "").trim();
+  if (!word) return "";
+  const prompt = `Солонгос үг "${word}"-ийн монгол утгыг ЗӨВХӨН утгыг буцаа. Тайлбар, өөр текст бичих хэрэггүй. Жишээ нь:
+- "안녕하세요" → "Сайн уу"
+- "감사합니다" → "Баярлалаа"
+- "공부하다" → "хичээллэх"
+- "학교" → "сургууль"
+
+Одоо: "${word}" →`;
+  try {
+    const text = await geminiCall(prompt, {
+      system: "Та солонгос-монгол хэлний орчуулагч. Зөвхөн утгыг буцаана, тайлбар бичихгүй.",
+    });
+    // Ихэвчлэн утга л буцаагдана
+    return text.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 100);
+  } catch (e) {
+    return "";
+  }
+}
+
+// Шалгалт/Бэлдэх дасгалын асуулт үүсгэх
+async function generateExamQuestions({ vocabs, grammars, count = 10, level = 0, recentVocabs = [] }) {
+  // vocabs = [{word, meaning}], grammars = [{word, meaning}]
+  if ((!vocabs || vocabs.length === 0) && (!grammars || grammars.length === 0)) {
+    return [];
+  }
+  const vocabStr = (vocabs || []).map((v, i) => `${i + 1}. ${v.word} = ${v.meaning}`).join("\n");
+  const grammarStr = (grammars || []).map((v, i) => `${i + 1}. ${v.word}: ${v.meaning}`).join("\n");
+  const recentStr = (recentVocabs || []).slice(0, 10).map(v => `${v.word} = ${v.meaning}`).join("\n");
+
+  const levelName = ["Pre-TOPIK", "TOPIK I-1", "TOPIK I-2", "TOPIK II-3", "TOPIK II-4", "TOPIK II-5", "TOPIK II-6"][level] || "TOPIK I-1";
+
+  const prompt = `Доорх солонгос үг, дүрмүүдээс ${count} ширхэг асуулт үүсгэ. Хариулагчийн түвшин: ${levelName}.
+
+ГОЛ ҮГС:
+${vocabStr || "(үгсгүй)"}
+
+ДҮРМҮҮД:
+${grammarStr || "(дүрэмгүй)"}
+
+ӨМНӨХ ҮЗСЭН ҮГС (бага сага оруулж болно):
+${recentStr || "(байхгүй)"}
+
+ДҮРЭМ:
+- 4 төрлийн асуулт оруулна: "multiple_choice" (4 сонголт), "translate_kr_mn" (солонгос→монгол бичих), "translate_mn_kr" (монгол→солонгос бичих), "fill_blank" (хоосон зайг гүйцээх).
+- multiple_choice бол 4 сонголтын зөвхөн 1 нь зөв байна, бусад нь үнэмшилтэй буруу.
+- translate_kr_mn бол сурагч монгол утгыг бичнэ.
+- translate_mn_kr бол сурагч солонгос үг/үсэг бичнэ.
+- fill_blank бол солонгос өгүүлбэрт ___ оруулаад зөв үгийг сонгуулна, 4 сонголттой.
+- 80% нь ГОЛ ҮГ/ДҮРМЭЭС, 20% нь ӨМНӨХ үгсээс байх.
+- Хэт хүнд биш, түвшинд тохирсон байх.
+
+ЗААВАЛ ДАРААХ JSON форматаар буцаа (өөр текст бичихгүй):
+{
+  "questions": [
+    {
+      "type": "multiple_choice",
+      "question": "학교-ийн утга юу вэ?",
+      "options": ["сургууль", "найз", "багш", "ном"],
+      "correct": "сургууль",
+      "audio": "학교"
+    },
+    {
+      "type": "translate_kr_mn",
+      "question": "Дараах үгийн утгыг бичнэ үү:",
+      "audio": "친구",
+      "correct": "найз",
+      "alternatives": ["анд", "нөхөр"]
+    },
+    {
+      "type": "translate_mn_kr",
+      "question": "Дараах монгол үгийг солонгосоор бичнэ үү:",
+      "prompt_text": "сургууль",
+      "correct": "학교"
+    },
+    {
+      "type": "fill_blank",
+      "question": "Хоосон зайг гүйцээ:",
+      "sentence": "나는 ___에 갑니다",
+      "audio": "나는 학교에 갑니다",
+      "options": ["학교", "친구", "음식", "물"],
+      "correct": "학교",
+      "translation": "Би сургуульд явж байна"
+    }
+  ]
+}`;
+
+  try {
+    const text = await geminiCall(prompt, {
+      system: "Та солонгос хэлний багш. JSON форматтай асуулт үүсгэнэ. Зөвхөн JSON буцаа, өөр текст бичихгүй.",
+      json: true,
+    });
+    const parsed = JSON.parse(text);
+    return parsed.questions || [];
+  } catch (e) {
+    console.error("Question generation error:", e);
+    return [];
+  }
+}
+
+// Жишээ өгүүлбэр үүсгэх (нэг үгэнд)
+async function generateExampleSentence(word, meaning, level = 0) {
+  const prompt = `Солонгос үг "${word}" (${meaning})-ийг ашиглан 1 энгийн жишээ өгүүлбэр үүсгэ.
+Хариуг ЗААВАЛ дараах JSON хэлбэрээр буцаа:
+{"sentence": "솔롱오스 жишээ өгүүлбэр", "translation": "Монгол утга"}
+Зөвхөн JSON, өөр зүйл бичихгүй.`;
+  try {
+    const text = await geminiCall(prompt, { json: true });
+    return JSON.parse(text);
+  } catch (e) {
+    return { sentence: word, translation: meaning };
+  }
+}
 
 const supa = {
   async from(table) {
@@ -681,9 +826,14 @@ function VocabTab({vocabEntries,t}){
           <div style={{fontSize:12,fontWeight:700,color:t.accent,marginBottom:7}}>📚 Үгс ({vocabs.length})</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:5}}>
             {vocabs.map(v=>(
-              <div key={v.id} style={{background:t.soft,borderRadius:9,padding:"6px 10px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontWeight:700,fontSize:12,color:t.text}}>{v.word}</span>
-                <span style={{fontSize:11,color:t.text,opacity:.6}}>{v.meaning}</span>
+              <div key={v.id} onClick={()=>speakKr(v.word)} className="k-press"
+                style={{background:t.soft,borderRadius:9,padding:"7px 10px",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",transition:"transform .15s",borderLeft:`3px solid ${t.accent}`}}
+                title="Дуудлага сонсох">
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontWeight:800,fontSize:13,color:t.text}}>{v.word}</div>
+                  <div style={{fontSize:10,color:t.text,opacity:.65,marginTop:1}}>{v.meaning}</div>
+                </div>
+                <span style={{fontSize:11,opacity:.5,marginLeft:6}}>🔊</span>
               </div>
             ))}
           </div>
@@ -695,9 +845,14 @@ function VocabTab({vocabEntries,t}){
           <div style={{fontSize:12,fontWeight:700,color:"#7c3aed",marginBottom:7}}>📖 Дүрэм ({grammars.length})</div>
           <div style={{display:"flex",flexDirection:"column",gap:6}}>
             {grammars.map(v=>(
-              <div key={v.id} style={{background:"#f5f0ff",borderRadius:9,padding:"8px 12px",border:"1px solid #c5b8ff"}}>
-                <div style={{fontWeight:700,fontSize:13,color:"#7c3aed",marginBottom:2}}>{v.word}</div>
-                <div style={{fontSize:11,color:"#555"}}>{v.meaning}</div>
+              <div key={v.id} onClick={()=>speakKr(v.word)} className="k-press"
+                style={{background:"#f5f0ff",borderRadius:9,padding:"8px 12px",border:"1px solid #c5b8ff",cursor:"pointer",transition:"transform .15s",display:"flex",alignItems:"center",gap:8}}
+                title="Дуудлага сонсох">
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:800,fontSize:13,color:"#7c3aed",marginBottom:2}}>{v.word}</div>
+                  <div style={{fontSize:11,color:"#555"}}>{v.meaning}</div>
+                </div>
+                <span style={{fontSize:11,opacity:.5}}>🔊</span>
               </div>
             ))}
           </div>
@@ -1069,7 +1224,1668 @@ function BulkAttendance({students,classDays,setStudents,onClose,onToast}){
   );
 }
 
+// ════════════════════════════════════════════════════════════════
+// 🎓 PRACTICE STUDIO — Солонгос хэлээ бэлдэх
+// 6 төрлийн дасгал, Duolingo маягийн UI
+// ════════════════════════════════════════════════════════════════
+
+function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, mode = "free", title }) {
+  // mode: "free" | "homework" | "exam"
+  // vocabs/grammars: тухайн дасгалд оруулах үгс
+  // onComplete(score) — дассан үед дуудна
+  const [stage, setStage] = useState("menu"); // menu | exercise | done
+  const [exerciseType, setExerciseType] = useState(null);
+  const [items, setItems] = useState([]); // Дасгалын items
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [wrongCount, setWrongCount] = useState(0);
+  const [streak, setStreak] = useState(0); // Дараалан зөв
+  const [maxStreak, setMaxStreak] = useState(0);
+  const [showResult, setShowResult] = useState(null); // null | "correct" | "wrong"
+  const [userAnswer, setUserAnswer] = useState("");
+  const [showHint, setShowHint] = useState(false);
+  const [startTime, setStartTime] = useState(null);
+
+  // Бүх үг (vocab+grammar)
+  const allWords = useMemo(() => {
+    const v = (vocabs || []).filter(x => x.word && x.meaning);
+    const g = (grammars || []).filter(x => x.word && x.meaning);
+    return [...v, ...g];
+  }, [vocabs, grammars]);
+
+  // Эмодиго pool — зурагтай дасгалд
+  const emojiMap = {
+    "сургууль": "🏫", "найз": "👫", "багш": "👩‍🏫", "ном": "📖",
+    "хоол": "🍚", "ус": "💧", "сүү": "🥛", "талх": "🍞",
+    "ээж": "👩", "аав": "👨", "хүүхэд": "👶", "гэр бүл": "👨‍👩‍👧",
+    "нохой": "🐶", "муур": "🐱", "шувуу": "🐦", "загас": "🐟",
+    "өнөөдөр": "📅", "маргааш": "⏭️", "өчигдөр": "⏮️",
+    "сайн уу": "👋", "баярлалаа": "🙏", "уучлаарай": "🙇",
+    "нэг": "1️⃣", "хоёр": "2️⃣", "гурав": "3️⃣", "дөрөв": "4️⃣", "тав": "5️⃣",
+    "цаг": "🕐", "өдөр": "☀️", "шөнө": "🌙", "өглөө": "🌅", "орой": "🌆",
+    "усанд орох": "🛁", "идэх": "🍴", "уух": "🥤", "унтах": "😴",
+  };
+  const getEmoji = (meaning) => {
+    const m = (meaning || "").toLowerCase().trim();
+    for (const k of Object.keys(emojiMap)) {
+      if (m.includes(k) || k.includes(m)) return emojiMap[k];
+    }
+    return "✨";
+  };
+
+  // ═══ Дасгал эхлүүлэх ═══
+  const startExercise = (type) => {
+    if (allWords.length < 1) return;
+    setExerciseType(type);
+    setCurrentIdx(0);
+    setCorrectCount(0);
+    setWrongCount(0);
+    setStreak(0);
+    setMaxStreak(0);
+    setShowResult(null);
+    setUserAnswer("");
+    setShowHint(false);
+    setStartTime(Date.now());
+
+    // Дасгалын items үүсгэх
+    const shuffled = [...allWords].sort(() => Math.random() - 0.5);
+    const itemCount = Math.min(allWords.length, type === "matching" ? 6 : 10);
+    const selected = shuffled.slice(0, itemCount);
+
+    if (type === "matching") {
+      // Matching — нэг round, олон үг
+      setItems([{
+        words: selected,
+        // shuffled meanings
+        meanings: [...selected].sort(() => Math.random() - 0.5).map(w => w.meaning),
+      }]);
+    } else if (type === "multiple_choice") {
+      // 4 сонголттой
+      setItems(selected.map(target => {
+        const distractors = shuffled.filter(w => w.word !== target.word).slice(0, 3);
+        const options = [...distractors.map(d => d.meaning), target.meaning].sort(() => Math.random() - 0.5);
+        return { target, options };
+      }));
+    } else if (type === "reverse_choice") {
+      // Монгол → Солонгос (4 сонголт)
+      setItems(selected.map(target => {
+        const distractors = shuffled.filter(w => w.word !== target.word).slice(0, 3);
+        const options = [...distractors.map(d => d.word), target.word].sort(() => Math.random() - 0.5);
+        return { target, options };
+      }));
+    } else if (type === "spelling") {
+      // Солонгосоор бичих
+      setItems(selected.map(target => ({ target })));
+    } else if (type === "listening") {
+      // Дуудлагаар сонсож бичих
+      setItems(selected.map(target => ({ target })));
+    } else if (type === "emoji") {
+      // Эмодигоор таних
+      setItems(selected.map(target => ({
+        target,
+        emoji: getEmoji(target.meaning),
+      })));
+    } else if (type === "flashcard") {
+      setItems(selected.map(target => ({ target, flipped: false })));
+    }
+
+    setStage("exercise");
+  };
+
+  // ═══ Хариулт шалгах ═══
+  const submitAnswer = (answer, correct) => {
+    const isRight = String(answer).trim().toLowerCase() === String(correct).trim().toLowerCase();
+    setShowResult(isRight ? "correct" : "wrong");
+    if (isRight) {
+      setCorrectCount(c => c + 1);
+      setStreak(s => {
+        const ns = s + 1;
+        setMaxStreak(m => Math.max(m, ns));
+        return ns;
+      });
+      // Tactile + sound
+      try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) {}
+    } else {
+      setWrongCount(c => c + 1);
+      setStreak(0);
+      try { if (navigator.vibrate) navigator.vibrate([30, 30, 30]); } catch (e) {}
+    }
+    setTimeout(() => {
+      setShowResult(null);
+      setUserAnswer("");
+      setShowHint(false);
+      if (currentIdx + 1 >= items.length) {
+        finishExercise(correctCount + (isRight ? 1 : 0));
+      } else {
+        setCurrentIdx(i => i + 1);
+      }
+    }, isRight ? 800 : 1500);
+  };
+
+  // ═══ Дасгал дуусгах ═══
+  const finishExercise = (finalCorrect) => {
+    const total = items.length;
+    const score = total > 0 ? Math.round((finalCorrect / total) * 100) : 0;
+    setStage("done");
+    if (onComplete) {
+      const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
+      onComplete({ score, correct: finalCorrect, total, exerciseType, elapsed, maxStreak });
+    }
+  };
+
+  // ═══ Header ═══
+  const Header = ({ subtitle }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, padding: "0 4px" }}>
+      <button onClick={() => stage === "menu" ? onClose() : setStage("menu")}
+        className="k-btn k-press"
+        style={{ background: "#fff", color: t.text, border: `2px solid ${t.border}`, borderRadius: 12, padding: "6px 12px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+        {stage === "menu" ? "← Хаах" : "← Цэс"}
+      </button>
+      <div style={{ flex: 1, textAlign: "center", padding: "0 8px" }}>
+        <div style={{ fontWeight: 800, fontSize: 14, color: t.text }}>{title || "Бэлдэх"}</div>
+        {subtitle && <div style={{ fontSize: 10, color: t.text, opacity: .65 }}>{subtitle}</div>}
+      </div>
+      <div style={{ minWidth: 60, textAlign: "right" }}>
+        {stage === "exercise" && (
+          <div style={{ fontSize: 13, fontWeight: 800, color: t.accent }}>{currentIdx + 1}/{items.length}</div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ═══ Progress bar ═══
+  const ProgressBar = () => {
+    const pct = items.length > 0 ? ((currentIdx) / items.length) * 100 : 0;
+    return (
+      <div style={{ height: 8, background: t.soft, borderRadius: 6, overflow: "hidden", marginBottom: 14 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg, ${t.accent}, ${t.accent}cc)`, transition: "width .4s ease", borderRadius: 6 }} />
+      </div>
+    );
+  };
+
+  // ═══ Streak indicator ═══
+  const StreakBadge = () => streak >= 3 ? (
+    <div className="k-pop" style={{ position: "absolute", top: 10, right: 10, background: "linear-gradient(135deg,#ff9800,#f57c00)", color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 11, fontWeight: 800, boxShadow: "0 4px 12px rgba(245,124,0,0.4)" }}>
+      🔥 {streak}
+    </div>
+  ) : null;
+
+  // ═══ Result feedback ═══
+  const ResultFeedback = () => {
+    if (!showResult) return null;
+    const isOk = showResult === "correct";
+    return (
+      <div className="k-pop" style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: isOk ? "linear-gradient(180deg, #c8e6c9 0%, #a5d6a7 100%)" : "linear-gradient(180deg, #ffcdd2 0%, #ef9a9a 100%)",
+        padding: "18px 20px",
+        zIndex: 1000,
+        textAlign: "center",
+        borderTopLeftRadius: 20, borderTopRightRadius: 20,
+        boxShadow: "0 -10px 30px rgba(0,0,0,0.15)",
+      }}>
+        <div style={{ fontSize: 36, marginBottom: 4 }}>{isOk ? "🎉" : "💔"}</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: isOk ? "#1b5e20" : "#b71c1c" }}>
+          {isOk ? "Зөв! +5 XP" : `Уучлаарай. Зөв хариу: ${items[currentIdx]?.target?.meaning || items[currentIdx]?.target?.word || ""}`}
+        </div>
+      </div>
+    );
+  };
+
+  // ═══ MENU (Дасгалын төрөл сонгох) ═══
+  if (stage === "menu") {
+    const exerciseTypes = [
+      { id: "flashcard", emoji: "🎴", title: "Flashcard", desc: "Үг харах, эргүүлж шалгах", color: "#42a5f5" },
+      { id: "multiple_choice", emoji: "✅", title: "Сонголт", desc: "4 хариунаас зөвийг сонго", color: "#66bb6a" },
+      { id: "reverse_choice", emoji: "🔄", title: "Монгол → Солонгос", desc: "Эсрэг чиглэлд таних", color: "#ab47bc" },
+      { id: "spelling", emoji: "⌨️", title: "Үсэглэх", desc: "Солонгосоор бичих", color: "#ff7043" },
+      { id: "listening", emoji: "👂", title: "Сонсох", desc: "Дуудлагыг сонсож бичих", color: "#ec407a" },
+      { id: "emoji", emoji: "🎨", title: "Зурагтай", desc: "Эмодигоор таних", color: "#26a69a" },
+    ];
+
+    return (
+      <div style={{ minHeight: "100vh", background: t.bg, padding: 14, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto" }}>
+        <Header subtitle={`${allWords.length} үг бэлэн`} />
+
+        {/* Welcome card */}
+        <div className="k-fade" style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}cc)`, color: "#fff", borderRadius: 18, padding: 18, marginBottom: 16, position: "relative", overflow: "hidden" }}>
+          <div style={{ fontSize: 28, marginBottom: 4 }} className="k-bouncy">🌸</div>
+          <div style={{ fontWeight: 800, fontSize: 17 }}>Сайн уу!</div>
+          <div style={{ fontSize: 13, opacity: 0.95, marginTop: 3 }}>Ямар дасгалаар бэлдмээр байна?</div>
+          <div style={{ position: "absolute", top: -20, right: -20, fontSize: 100, opacity: 0.15 }}>📚</div>
+        </div>
+
+        {/* Дасгалын төрөл grid */}
+        {allWords.length === 0 ? (
+          <div style={{ background: t.card, borderRadius: 16, padding: 30, textAlign: "center", border: `2px dashed ${t.border}` }}>
+            <div style={{ fontSize: 48, marginBottom: 10, opacity: 0.5 }}>📭</div>
+            <div style={{ fontSize: 14, color: t.text, fontWeight: 700 }}>Үг байхгүй байна</div>
+            <div style={{ fontSize: 11, color: t.text, opacity: 0.6, marginTop: 4 }}>Багш үг нэмсний дараа бэлдэх боломжтой</div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {exerciseTypes.map((ex, i) => (
+              <div key={ex.id} onClick={() => startExercise(ex.id)}
+                className="k-card-hover"
+                style={{
+                  background: "#fff",
+                  borderRadius: 16,
+                  padding: 14,
+                  border: `2px solid ${ex.color}33`,
+                  borderTop: `4px solid ${ex.color}`,
+                  cursor: "pointer",
+                  animation: `kSlideUp .35s ease ${i * 0.05}s both`,
+                  textAlign: "center",
+                }}>
+                <div style={{ fontSize: 32, marginBottom: 6 }}>{ex.emoji}</div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: "#1a1a2e" }}>{ex.title}</div>
+                <div style={{ fontSize: 10, color: "#888", marginTop: 2, lineHeight: 1.3 }}>{ex.desc}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: t.text, opacity: 0.5 }}>
+          화이팅! 🌸 Чадна!
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ DONE (Үр дүн) ═══
+  if (stage === "done") {
+    const total = items.length;
+    const score = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+    const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
+    const isGreat = score >= 80;
+    const isGood = score >= 60;
+
+    return (
+      <div style={{ minHeight: "100vh", background: t.bg, padding: 14, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto" }}>
+        <div className="k-pop" style={{ background: "#fff", borderRadius: 22, padding: 24, textAlign: "center", border: `2px solid ${t.border}`, marginTop: 20 }}>
+          <div className="k-bouncy" style={{ fontSize: 70, marginBottom: 10 }}>
+            {isGreat ? "🏆" : isGood ? "🎉" : "💪"}
+          </div>
+          <div style={{ fontWeight: 900, fontSize: 22, color: t.accent, marginBottom: 4 }}>
+            {isGreat ? "Гайхалтай!" : isGood ? "Сайн хийсэн!" : "Үргэлжлүүл!"}
+          </div>
+          <div style={{ fontSize: 13, color: t.text, opacity: 0.7, marginBottom: 18 }}>
+            {isGreat ? "Тогтоосон даалгавраа гайхалтай хийсэн!" : isGood ? "Сайн ажиллалаа, илүү дадлагалъя!" : "Бууж өгөхгүй, дахин оролд!"}
+          </div>
+
+          {/* Score */}
+          <div style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}cc)`, borderRadius: 16, padding: 18, marginBottom: 14 }}>
+            <div style={{ color: "#fff", fontSize: 14, opacity: 0.9, fontWeight: 700 }}>ОНОО</div>
+            <div style={{ color: "#fff", fontSize: 44, fontWeight: 900, lineHeight: 1, marginTop: 4 }}>{score}<span style={{ fontSize: 22 }}>/100</span></div>
+            <div style={{ color: "#fff", fontSize: 12, opacity: 0.9, marginTop: 6 }}>{correctCount} зөв / {total} нийт</div>
+          </div>
+
+          {/* Stats */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
+            <div style={{ background: t.soft, borderRadius: 12, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, color: t.text, opacity: 0.7, fontWeight: 700 }}>🔥 MAX STREAK</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: t.accent }}>{maxStreak}</div>
+            </div>
+            <div style={{ background: t.soft, borderRadius: 12, padding: "10px 12px" }}>
+              <div style={{ fontSize: 10, color: t.text, opacity: 0.7, fontWeight: 700 }}>⏱️ ХУГАЦАА</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: t.accent }}>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setStage("menu")} className="k-btn k-press"
+              style={{ flex: 1, background: "#fff", color: t.accent, border: `2px solid ${t.accent}`, borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+              🔄 Дахин
+            </button>
+            <button onClick={onClose} className="k-btn k-press"
+              style={{ flex: 1, background: t.accent, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 13, cursor: "pointer", boxShadow: `0 4px 0 ${t.border}` }}>
+              ✅ Дуусгах
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ EXERCISES ═══
+  const current = items[currentIdx];
+  if (!current) return null;
+
+  return (
+    <div style={{ minHeight: "100vh", background: t.bg, padding: 14, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto", position: "relative" }}>
+      <Header />
+      <ProgressBar />
+      <div style={{ position: "relative" }}>
+        <StreakBadge />
+
+        {/* ── FLASHCARD ── */}
+        {exerciseType === "flashcard" && (
+          <FlashcardExercise current={current} t={t} speakKr={speakKr}
+            onNext={(known) => {
+              if (known) setCorrectCount(c => c + 1);
+              else setWrongCount(c => c + 1);
+              if (currentIdx + 1 >= items.length) {
+                finishExercise(correctCount + (known ? 1 : 0));
+              } else {
+                setCurrentIdx(i => i + 1);
+              }
+            }} />
+        )}
+
+        {/* ── MULTIPLE CHOICE (Solongos → Mongol) ── */}
+        {exerciseType === "multiple_choice" && (
+          <MCExercise current={current} t={t} speakKr={speakKr}
+            questionKey="word" answerKey="meaning"
+            label="Энэ үгийн утгыг сонго:"
+            showResult={showResult}
+            onSubmit={(ans) => submitAnswer(ans, current.target.meaning)} />
+        )}
+
+        {/* ── REVERSE CHOICE (Mongol → Solongos) ── */}
+        {exerciseType === "reverse_choice" && (
+          <MCExercise current={current} t={t} speakKr={speakKr}
+            questionKey="meaning" answerKey="word"
+            label="Дараах монгол үгэнд тохирох солонгос үгийг сонго:"
+            noAudio={true}
+            showResult={showResult}
+            onSubmit={(ans) => submitAnswer(ans, current.target.word)} />
+        )}
+
+        {/* ── SPELLING (Үсэглэх) ── */}
+        {exerciseType === "spelling" && (
+          <SpellingExercise current={current} t={t} speakKr={speakKr}
+            userAnswer={userAnswer} setUserAnswer={setUserAnswer}
+            showHint={showHint} setShowHint={setShowHint}
+            showResult={showResult}
+            onSubmit={() => submitAnswer(userAnswer, current.target.word)} />
+        )}
+
+        {/* ── LISTENING (Сонсох) ── */}
+        {exerciseType === "listening" && (
+          <ListeningExercise current={current} t={t} speakKr={speakKr}
+            userAnswer={userAnswer} setUserAnswer={setUserAnswer}
+            showResult={showResult}
+            onSubmit={() => submitAnswer(userAnswer, current.target.word)} />
+        )}
+
+        {/* ── EMOJI ── */}
+        {exerciseType === "emoji" && (
+          <EmojiExercise current={current} t={t}
+            allWords={allWords}
+            showResult={showResult}
+            onSubmit={(ans) => submitAnswer(ans, current.target.meaning)} />
+        )}
+      </div>
+
+      <ResultFeedback />
+    </div>
+  );
+}
+
+// ═══ Дэд компонентууд ═══
+
+function FlashcardExercise({ current, t, speakKr, onNext }) {
+  const [flipped, setFlipped] = useState(false);
+  return (
+    <div className="k-pop" key={current.target.word} style={{ animation: "kPop .35s cubic-bezier(0.34,1.56,0.64,1)" }}>
+      <div onClick={() => setFlipped(f => !f)} style={{
+        background: flipped ? t.accent : "#fff",
+        color: flipped ? "#fff" : t.text,
+        borderRadius: 22,
+        padding: "40px 24px",
+        textAlign: "center",
+        cursor: "pointer",
+        minHeight: 220,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        border: `3px solid ${t.border}`,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+        transition: "all 0.4s ease",
+      }}>
+        <div style={{ fontSize: 11, opacity: 0.7, fontWeight: 700, letterSpacing: 1, marginBottom: 10, textTransform: "uppercase" }}>
+          {flipped ? "ХАРИУ" : "ҮГ"}
+        </div>
+        <div style={{ fontSize: flipped ? 30 : 44, fontWeight: 900, marginBottom: 14, lineHeight: 1.2 }}>
+          {flipped ? current.target.meaning : current.target.word}
+        </div>
+        {!flipped && (
+          <button onClick={(e) => { e.stopPropagation(); speakKr(current.target.word); }}
+            className="k-btn k-press"
+            style={{ background: t.soft, color: t.accent, border: "none", borderRadius: 12, padding: "8px 14px", fontSize: 16, cursor: "pointer", fontWeight: 700 }}>
+            🔊 Сонсох
+          </button>
+        )}
+        <div style={{ fontSize: 10, opacity: 0.6, marginTop: 16, fontWeight: 600 }}>
+          {flipped ? "Дахин дарж эргүүл" : "👆 Дарж эргүүл"}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <button onClick={() => onNext(false)} className="k-btn k-press"
+          style={{ flex: 1, background: "#ffcdd2", color: "#c62828", border: "none", borderRadius: 14, padding: "14px", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 0 #ef9a9a" }}>
+          😅 Мэдэхгүй
+        </button>
+        <button onClick={() => onNext(true)} className="k-btn k-press"
+          style={{ flex: 1, background: "#c8e6c9", color: "#2e7d32", border: "none", borderRadius: 14, padding: "14px", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 0 #a5d6a7" }}>
+          ✅ Мэднэ
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MCExercise({ current, t, speakKr, questionKey, answerKey, label, noAudio, showResult, onSubmit }) {
+  const [selected, setSelected] = useState(null);
+  useEffect(() => { setSelected(null); }, [current]);
+
+  const handleClick = (opt) => {
+    if (selected !== null || showResult) return;
+    setSelected(opt);
+    setTimeout(() => onSubmit(opt), 200);
+  };
+
+  return (
+    <div key={current.target.word}>
+      <div style={{ background: "#fff", borderRadius: 18, padding: "30px 20px", textAlign: "center", marginBottom: 14, border: `2px solid ${t.border}` }}>
+        <div style={{ fontSize: 11, opacity: 0.6, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>{label}</div>
+        <div style={{ fontSize: 38, fontWeight: 900, color: t.text, marginBottom: 12, lineHeight: 1.2 }}>
+          {current.target[questionKey]}
+        </div>
+        {!noAudio && (
+          <button onClick={() => speakKr(current.target.word)} className="k-btn k-press"
+            style={{ background: t.soft, color: t.accent, border: "none", borderRadius: 12, padding: "8px 16px", fontSize: 14, cursor: "pointer", fontWeight: 700 }}>
+            🔊 Сонсох
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {current.options.map((opt, i) => {
+          const isSel = selected === opt;
+          const isCorrect = showResult && opt === current.target[answerKey];
+          const isWrong = showResult === "wrong" && isSel;
+          let bg = "#fff", col = t.text, border = t.border;
+          if (isCorrect) { bg = "#c8e6c9"; col = "#1b5e20"; border = "#66bb6a"; }
+          else if (isWrong) { bg = "#ffcdd2"; col = "#b71c1c"; border = "#e57373"; }
+          else if (isSel) { bg = t.soft; col = t.accent; border = t.accent; }
+          return (
+            <div key={i} onClick={() => handleClick(opt)} className="k-press"
+              style={{
+                background: bg, color: col,
+                border: `2px solid ${border}`,
+                borderRadius: 14, padding: "16px 12px",
+                fontSize: 15, fontWeight: 700,
+                textAlign: "center",
+                cursor: selected !== null ? "default" : "pointer",
+                transition: "all 0.2s",
+                animation: `kSlideUp .3s ease ${i * 0.05}s both`,
+              }}>
+              {opt}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SpellingExercise({ current, t, speakKr, userAnswer, setUserAnswer, showHint, setShowHint, showResult, onSubmit }) {
+  return (
+    <div key={current.target.word}>
+      <div style={{ background: "#fff", borderRadius: 18, padding: "30px 20px", textAlign: "center", marginBottom: 14, border: `2px solid ${t.border}` }}>
+        <div style={{ fontSize: 11, opacity: 0.6, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>МОНГОЛООР</div>
+        <div style={{ fontSize: 30, fontWeight: 900, color: t.text, marginBottom: 14, lineHeight: 1.2 }}>
+          {current.target.meaning}
+        </div>
+        <div style={{ fontSize: 11, opacity: 0.7, color: t.text }}>👇 Солонгос үгээ бичнэ үү</div>
+      </div>
+
+      <input
+        type="text"
+        value={userAnswer}
+        onChange={e => setUserAnswer(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && userAnswer.trim() && onSubmit()}
+        placeholder="한국어"
+        disabled={!!showResult}
+        autoFocus
+        style={{
+          width: "100%",
+          padding: "16px 20px",
+          borderRadius: 14,
+          border: `2px solid ${t.border}`,
+          fontSize: 22,
+          fontWeight: 700,
+          textAlign: "center",
+          outline: "none",
+          marginBottom: 12,
+          background: "#fff",
+        }}
+      />
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => setShowHint(true)} className="k-btn k-press"
+          style={{ background: t.soft, color: t.accent, border: "none", borderRadius: 12, padding: "12px", fontWeight: 700, fontSize: 12, cursor: "pointer", flex: 1 }}>
+          💡 Сэжүүр
+        </button>
+        <button onClick={onSubmit} disabled={!userAnswer.trim() || !!showResult} className="k-btn k-press"
+          style={{ background: t.accent, color: "#fff", border: "none", borderRadius: 12, padding: "12px", fontWeight: 800, fontSize: 13, cursor: "pointer", flex: 2, opacity: userAnswer.trim() ? 1 : 0.5, boxShadow: `0 4px 0 ${t.border}` }}>
+          ✓ Шалгах
+        </button>
+      </div>
+      {showHint && (
+        <div className="k-fade" style={{ marginTop: 14, padding: 14, background: "#fff3cd", border: "2px solid #ffe082", borderRadius: 12, textAlign: "center" }}>
+          <div style={{ fontSize: 11, color: "#b8860b", fontWeight: 700, marginBottom: 4 }}>💡 СЭЖҮҮР</div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: "#b8860b", letterSpacing: 3 }}>
+            {current.target.word.charAt(0)}{"_".repeat(Math.max(0, current.target.word.length - 1))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListeningExercise({ current, t, speakKr, userAnswer, setUserAnswer, showResult, onSubmit }) {
+  useEffect(() => {
+    // автоматаар сонсуулна
+    const tm = setTimeout(() => speakKr(current.target.word), 300);
+    return () => clearTimeout(tm);
+  }, [current]);
+
+  return (
+    <div key={current.target.word}>
+      <div style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}cc)`, color: "#fff", borderRadius: 22, padding: "50px 20px", textAlign: "center", marginBottom: 14, position: "relative" }}>
+        <div style={{ fontSize: 11, opacity: 0.9, fontWeight: 700, letterSpacing: 1, marginBottom: 16 }}>СОНСООД БИЧИХ</div>
+        <button onClick={() => speakKr(current.target.word)} className="k-btn k-press"
+          style={{ background: "#fff", color: t.accent, border: "none", borderRadius: "50%", width: 80, height: 80, fontSize: 36, cursor: "pointer", boxShadow: "0 8px 20px rgba(0,0,0,0.2)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
+          🔊
+        </button>
+        <div style={{ fontSize: 12, opacity: 0.9, marginTop: 14, fontWeight: 600 }}>👆 Дахин сонсох</div>
+      </div>
+
+      <input
+        type="text"
+        value={userAnswer}
+        onChange={e => setUserAnswer(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && userAnswer.trim() && onSubmit()}
+        placeholder="Сонссон үгээ бичнэ үү..."
+        disabled={!!showResult}
+        autoFocus
+        style={{
+          width: "100%",
+          padding: "16px 20px",
+          borderRadius: 14,
+          border: `2px solid ${t.border}`,
+          fontSize: 20,
+          fontWeight: 700,
+          textAlign: "center",
+          outline: "none",
+          marginBottom: 12,
+          background: "#fff",
+        }}
+      />
+
+      <button onClick={onSubmit} disabled={!userAnswer.trim() || !!showResult} className="k-btn k-press"
+        style={{ background: t.accent, color: "#fff", border: "none", borderRadius: 12, padding: "14px", fontWeight: 800, fontSize: 14, cursor: "pointer", width: "100%", opacity: userAnswer.trim() ? 1 : 0.5, boxShadow: `0 4px 0 ${t.border}` }}>
+        ✓ Шалгах
+      </button>
+    </div>
+  );
+}
+
+function EmojiExercise({ current, t, allWords, showResult, onSubmit }) {
+  const [selected, setSelected] = useState(null);
+  // 4 сонголт
+  const options = useMemo(() => {
+    const others = allWords.filter(w => w.word !== current.target.word).sort(() => Math.random() - 0.5).slice(0, 3);
+    return [...others.map(o => o.meaning), current.target.meaning].sort(() => Math.random() - 0.5);
+  }, [current]);
+  useEffect(() => { setSelected(null); }, [current]);
+
+  const handleClick = (opt) => {
+    if (selected !== null || showResult) return;
+    setSelected(opt);
+    setTimeout(() => onSubmit(opt), 200);
+  };
+
+  return (
+    <div key={current.target.word}>
+      <div style={{ background: "#fff", borderRadius: 22, padding: "40px 20px", textAlign: "center", marginBottom: 14, border: `2px solid ${t.border}` }}>
+        <div style={{ fontSize: 80, marginBottom: 10 }} className="k-float">{current.emoji}</div>
+        <div style={{ fontSize: 28, fontWeight: 900, color: t.text }}>{current.target.word}</div>
+        <div style={{ fontSize: 11, opacity: 0.7, color: t.text, marginTop: 8, fontWeight: 700 }}>Энэ үгийн утгыг сонго</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {options.map((opt, i) => {
+          const isSel = selected === opt;
+          const isCorrect = showResult && opt === current.target.meaning;
+          const isWrong = showResult === "wrong" && isSel;
+          let bg = "#fff", col = t.text, border = t.border;
+          if (isCorrect) { bg = "#c8e6c9"; col = "#1b5e20"; border = "#66bb6a"; }
+          else if (isWrong) { bg = "#ffcdd2"; col = "#b71c1c"; border = "#e57373"; }
+          else if (isSel) { bg = t.soft; col = t.accent; border = t.accent; }
+          return (
+            <div key={i} onClick={() => handleClick(opt)} className="k-press"
+              style={{
+                background: bg, color: col,
+                border: `2px solid ${border}`,
+                borderRadius: 14, padding: "14px 10px",
+                fontSize: 14, fontWeight: 700,
+                textAlign: "center",
+                cursor: selected !== null ? "default" : "pointer",
+                transition: "all 0.2s",
+                animation: `kSlideUp .3s ease ${i * 0.05}s both`,
+              }}>
+              {opt}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// 📝 HOMEWORK & EXAM SYSTEM
+// ════════════════════════════════════════════════════════════════
+
+// ── Date helper ────────────────────────────────────────
+const _fmtDateTime = (d) => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (isNaN(dt)) return d;
+  return `${dt.getFullYear()}/${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+};
+
+// ════════════════════════════════════════════════════════════════
+// 📝 BAGSH — Даалгавар үүсгэх
+// ════════════════════════════════════════════════════════════════
+function CreateHomeworkModal({ cls, vocabEntries, students, teacherId, onClose, onCreated, onToast }) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [fileUrl, setFileUrl] = useState("");
+  const [fileName, setFileName] = useState("");
+  const [dueDate, setDueDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+  });
+  const [scopeDate, setScopeDate] = useState(TODAY); // Тухайн өдрийн үгсээс
+  const [xpReward, setXpReward] = useState(30);
+  const [saving, setSaving] = useState(false);
+
+  // scopeDate-ийн үгс
+  const scopeVocabs = vocabEntries.filter(v => v.date === scopeDate);
+  const availableDates = useMemo(() => {
+    const dates = [...new Set(vocabEntries.filter(v => v.date).map(v => v.date))].sort().reverse();
+    return dates;
+  }, [vocabEntries]);
+
+  const submit = async () => {
+    if (!title.trim()) {
+      onToast && onToast("❌ Гарчиг шаардлагатай", "error");
+      return;
+    }
+    if (scopeVocabs.length === 0) {
+      onToast && onToast("❌ Тухайн өдөр үг байхгүй байна", "error");
+      return;
+    }
+    setSaving(true);
+    const hw = {
+      id: `hw${Date.now()}`,
+      class_id: cls.id,
+      teacher_id: teacherId,
+      title: title.trim(),
+      description: description.trim() || null,
+      file_url: fileUrl.trim() || null,
+      file_name: fileName.trim() || null,
+      vocab_ids: scopeVocabs.map(v => v.id),
+      due_date: dueDate,
+      xp_reward: xpReward,
+    };
+    try {
+      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
+      const r = await fetch(`${SUPA_URL}/rest/v1/homeworks`, { method: "POST", headers: h, body: JSON.stringify(hw) });
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(t.slice(0, 100));
+      }
+      onCreated && onCreated(hw);
+      onToast && onToast("✅ Даалгавар өгсөн", "success");
+      onClose();
+    } catch (e) {
+      console.error("HW create err", e);
+      onToast && onToast("❌ Алдаа гарлаа: " + e.message, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={onClose} maxW={420}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <div style={{ fontSize: 24 }}>📝</div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#1a1a2e" }}>Гэрийн даалгавар өгөх</div>
+          <div style={{ fontSize: 11, color: "#888" }}>{cls.name} · {students.length} сурагч</div>
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5, letterSpacing: 0.5 }}>📌 ГАРЧИГ</div>
+        <input value={title} onChange={e => setTitle(e.target.value)}
+          placeholder="Жишээ нь: Сарын 16-ны үгсээ цээжлэх"
+          style={INP} />
+      </div>
+
+      {/* Scope date */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5, letterSpacing: 0.5 }}>📅 ҮГИЙН ХАМРАХ ӨДӨР</div>
+        {availableDates.length === 0 ? (
+          <div style={{ background: "#fff3cd", border: "1px solid #ffe082", borderRadius: 10, padding: "8px 12px", fontSize: 12, color: "#b8860b" }}>
+            ⚠️ Үг нэмээгүй байна
+          </div>
+        ) : (
+          <select value={scopeDate} onChange={e => setScopeDate(e.target.value)}
+            style={{ ...INP, cursor: "pointer" }}>
+            {availableDates.map(d => {
+              const cnt = vocabEntries.filter(v => v.date === d).length;
+              return <option key={d} value={d}>{d} — {cnt} үг</option>;
+            })}
+          </select>
+        )}
+        {scopeVocabs.length > 0 && (
+          <div style={{ marginTop: 6, background: "#f5f0ff", borderRadius: 10, padding: 8, fontSize: 11, color: "#7c3aed" }}>
+            <div style={{ fontWeight: 700, marginBottom: 3 }}>🎯 {scopeVocabs.length} үг/дүрэм оруулна:</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+              {scopeVocabs.slice(0, 10).map(v => (
+                <span key={v.id} style={{ background: "#fff", borderRadius: 6, padding: "1px 6px", fontSize: 11, fontWeight: 700 }}>
+                  {v.word}
+                </span>
+              ))}
+              {scopeVocabs.length > 10 && <span style={{ fontSize: 10, opacity: 0.7 }}>+{scopeVocabs.length - 10}</span>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Due date */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5, letterSpacing: 0.5 }}>⏰ ДУУСАХ ХУГАЦАА</div>
+        <input type="datetime-local" value={dueDate} onChange={e => setDueDate(e.target.value)}
+          min={new Date().toISOString().slice(0, 16)}
+          style={INP} />
+      </div>
+
+      {/* Description */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5, letterSpacing: 0.5 }}>📋 ЗААВАРЧИЛГАА (заавал биш)</div>
+        <textarea value={description} onChange={e => setDescription(e.target.value)}
+          placeholder="Жишээ: 30 минут хичээллээрэй, бүх үгээ зөв болгоорой..."
+          rows={3}
+          style={{ ...INP, resize: "vertical", fontFamily: "inherit" }} />
+      </div>
+
+      {/* File URL (optional) */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5, letterSpacing: 0.5 }}>📎 ФАЙЛЫН ХОЛБООС (заавал биш)</div>
+        <input value={fileUrl} onChange={e => setFileUrl(e.target.value)}
+          placeholder="https://drive.google.com/... эсвэл бусад"
+          style={INP} />
+        {fileUrl && (
+          <input value={fileName} onChange={e => setFileName(e.target.value)}
+            placeholder="Файлын нэр (жишээ нь: Сонсох дасгал.mp3)"
+            style={{ ...INP, marginTop: 6, fontSize: 12 }} />
+        )}
+      </div>
+
+      {/* XP reward */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5, letterSpacing: 0.5 }}>⚡ XP ШАГНАЛ</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[20, 30, 50, 80, 100].map(x => (
+            <button key={x} onClick={() => setXpReward(x)} className="k-btn k-press"
+              style={{
+                flex: 1, padding: "8px 4px", borderRadius: 10,
+                border: xpReward === x ? "2px solid #7c3aed" : "2px solid #e0e0e0",
+                background: xpReward === x ? "#f5f0ff" : "#fff",
+                color: xpReward === x ? "#7c3aed" : "#666",
+                fontWeight: 800, fontSize: 13, cursor: "pointer"
+              }}>
+              +{x}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onClose} className="k-btn k-press"
+          style={{ ...bs("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+        <button onClick={submit} disabled={saving || !title.trim() || scopeVocabs.length === 0} className="k-btn k-press"
+          style={{ ...bs("#7c3aed", "#fff"), flex: 2, justifyContent: "center", fontWeight: 800, opacity: (saving || !title.trim() || scopeVocabs.length === 0) ? 0.5 : 1, boxShadow: "0 4px 0 #5b21b6" }}>
+          {saving ? "⏳ Илгээж байна..." : "📤 Даалгавар өгөх"}
+        </button>
+      </div>
+    </Overlay>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// 📋 BAGSH — Даалгаваруудын жагсаалт + хэн хийсэн
+// ════════════════════════════════════════════════════════════════
+function HomeworkListModal({ cls, students, vocabEntries, homeworks, submissions, isSuperAdmin, currentTeacherId, onClose, onRefresh, onToast }) {
+  const [selHw, setSelHw] = useState(null);
+
+  // Тухайн ангид харьяалагдах даалгаврууд
+  const classHws = homeworks.filter(hw => hw.class_id === cls.id).sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+
+  // Сонгосон даалгавар
+  if (selHw) {
+    const subs = submissions.filter(s => s.homework_id === selHw.id);
+    const completedIds = new Set(subs.map(s => s.student_id));
+    const completed = students.filter(s => completedIds.has(s.id));
+    const pending = students.filter(s => !completedIds.has(s.id));
+    const pct = students.length > 0 ? Math.round((completed.length / students.length) * 100) : 0;
+
+    const deleteHw = async () => {
+      if (!window.confirm("Энэ даалгаврыг устгах уу?")) return;
+      try {
+        const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` };
+        await fetch(`${SUPA_URL}/rest/v1/homework_submissions?homework_id=eq.${selHw.id}`, { method: "DELETE", headers: h });
+        await fetch(`${SUPA_URL}/rest/v1/homeworks?id=eq.${selHw.id}`, { method: "DELETE", headers: h });
+        onRefresh && onRefresh();
+        onToast && onToast("✅ Устгагдлаа", "success");
+        setSelHw(null);
+      } catch (e) {
+        onToast && onToast("❌ Алдаа: " + e.message, "error");
+      }
+    };
+
+    const isOwner = selHw.teacher_id === currentTeacherId || isSuperAdmin;
+    const isOverdue = new Date(selHw.due_date) < new Date();
+
+    return (
+      <Overlay onClose={onClose} maxW={440}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          <button onClick={() => setSelHw(null)} className="k-btn k-press" style={bs("#f0f0f0", "#555", undefined, true)}>← Буцах</button>
+          <div style={{ flex: 1, fontWeight: 800, fontSize: 14, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selHw.title}</div>
+          {isOwner && (
+            <button onClick={deleteHw} className="k-btn k-press" style={bs("#fff0f0", "#e53935", "#ffcdd2", true)}>🗑️</button>
+          )}
+        </div>
+
+        {/* Info */}
+        <div style={{ background: "#f5f0ff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 6 }}>⏰ ДУУСАХ: {_fmtDateTime(selHw.due_date)}</div>
+          <div style={{ fontSize: 11, color: "#7c3aed", marginBottom: 4 }}>⚡ XP: +{selHw.xp_reward || 30}</div>
+          <div style={{ fontSize: 11, color: "#7c3aed" }}>📚 {(selHw.vocab_ids || []).length} үг/дүрэм</div>
+          {selHw.description && (
+            <div style={{ marginTop: 8, padding: 8, background: "#fff", borderRadius: 8, fontSize: 12, color: "#555", lineHeight: 1.5 }}>
+              {selHw.description}
+            </div>
+          )}
+          {selHw.file_url && (
+            <a href={selHw.file_url} target="_blank" rel="noopener noreferrer"
+              style={{ display: "inline-block", marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 8, fontSize: 11, color: "#7c3aed", fontWeight: 700, textDecoration: "none", border: "1px solid #d4b8ff" }}>
+              📎 {selHw.file_name || "Файл татах"}
+            </a>
+          )}
+        </div>
+
+        {/* Progress */}
+        <div style={{ background: "#fff", borderRadius: 14, padding: 12, marginBottom: 12, border: "2px solid #e0e0e0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#1a1a2e" }}>📊 Гүйцэтгэл</div>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#43a047" }}>{completed.length}/{students.length} ({pct}%)</div>
+          </div>
+          <div style={{ height: 10, background: "#f0f0f0", borderRadius: 5, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${pct}%`, background: `linear-gradient(90deg,#66bb6a,#43a047)`, transition: "width .6s ease" }} />
+          </div>
+        </div>
+
+        {/* Lists */}
+        <div style={{ maxHeight: "40vh", overflowY: "auto", marginLeft: -4, marginRight: -4 }}>
+          {completed.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#43a047", marginBottom: 6, paddingLeft: 4 }}>✅ ХИЙСЭН ({completed.length})</div>
+              {completed.map(s => {
+                const sub = subs.find(x => x.student_id === s.id);
+                return (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: 8, background: "#e8f5e9", borderRadius: 10, marginBottom: 4 }}>
+                    <div style={{ flex: 1, fontWeight: 700, fontSize: 13, color: "#1b5e20" }}>{s.name}</div>
+                    {sub?.score != null && <div style={{ fontSize: 12, fontWeight: 800, color: "#1b5e20" }}>{sub.score}%</div>}
+                    {sub?.on_time === false && <div style={{ fontSize: 10, color: "#e65100", fontWeight: 700 }}>(хоцорсон)</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {pending.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: isOverdue ? "#c62828" : "#888", marginBottom: 6, paddingLeft: 4 }}>
+                {isOverdue ? "❌ ХОЦОРСОН" : "⏳ ХҮЛЭЭГДЭЖ БУЙ"} ({pending.length})
+              </div>
+              {pending.map(s => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: 8, background: isOverdue ? "#fff0f0" : "#fafafa", borderRadius: 10, marginBottom: 4 }}>
+                  <div style={{ flex: 1, fontWeight: 600, fontSize: 13, color: "#555" }}>{s.name}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Overlay>
+    );
+  }
+
+  return (
+    <Overlay onClose={onClose} maxW={440}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#1a1a2e" }}>📝 Даалгаврууд</div>
+          <div style={{ fontSize: 11, color: "#888" }}>{classHws.length} даалгавар · {cls.name}</div>
+        </div>
+      </div>
+
+      {classHws.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "30px 0", color: "#aaa", fontSize: 13 }}>
+          <div style={{ fontSize: 40, marginBottom: 8, opacity: 0.5 }}>📭</div>
+          Даалгавар байхгүй байна
+        </div>
+      ) : (
+        <div style={{ maxHeight: "60vh", overflowY: "auto", marginLeft: -4, marginRight: -4 }}>
+          {classHws.map(hw => {
+            const subs = submissions.filter(s => s.homework_id === hw.id);
+            const pct = students.length > 0 ? Math.round((subs.length / students.length) * 100) : 0;
+            const isOverdue = new Date(hw.due_date) < new Date();
+            return (
+              <div key={hw.id} onClick={() => setSelHw(hw)} className="k-card-hover"
+                style={{ background: "#fff", borderRadius: 12, padding: 12, marginBottom: 6, border: `2px solid ${isOverdue ? "#ffcdd2" : "#e0e0e0"}`, cursor: "pointer" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <div style={{ flex: 1, fontWeight: 800, fontSize: 14, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hw.title}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: pct >= 70 ? "#43a047" : pct >= 40 ? "#f57c00" : "#c62828" }}>{pct}%</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#888" }}>
+                  <span>⏰ {_fmtDateTime(hw.due_date)}</span>
+                  {isOverdue && <span style={{ background: "#fff0f0", color: "#c62828", padding: "1px 6px", borderRadius: 6, fontWeight: 700 }}>Дууссан</span>}
+                </div>
+                <div style={{ marginTop: 4, height: 4, background: "#f0f0f0", borderRadius: 2, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: pct >= 70 ? "#66bb6a" : pct >= 40 ? "#ffa726" : "#ef5350" }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Overlay>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// 🎓 SURAGCH — Даалгавар хийх (нэг даалгавар сонгох)
+// ════════════════════════════════════════════════════════════════
+function StudentHomeworkCard({ hw, vocabEntries, isCompleted, submission, t, onStart }) {
+  const isOverdue = new Date(hw.due_date) < new Date();
+  const hwVocabs = vocabEntries.filter(v => (hw.vocab_ids || []).includes(v.id));
+
+  let bg = t.card, borderC = t.border, status = null;
+  if (isCompleted) {
+    bg = "#e8f5e9"; borderC = "#66bb6a"; status = { text: "✅ Хийсэн", color: "#1b5e20" };
+  } else if (isOverdue) {
+    bg = "#ffebee"; borderC = "#ef9a9a"; status = { text: "⏰ Хоцорсон", color: "#c62828" };
+  } else {
+    status = { text: "🎯 Хийх", color: t.accent };
+  }
+
+  return (
+    <div onClick={() => !isCompleted && !isOverdue && onStart(hw, hwVocabs)} className="k-card-hover"
+      style={{ background: bg, borderRadius: 14, padding: 12, marginBottom: 8, border: `2px solid ${borderC}`, cursor: (isCompleted || isOverdue) ? "default" : "pointer" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <div style={{ flex: 1, fontWeight: 800, fontSize: 14, color: t.text }}>{hw.title}</div>
+        {status && <div style={{ fontSize: 11, fontWeight: 800, color: status.color, background: "#fff", borderRadius: 8, padding: "2px 8px" }}>{status.text}</div>}
+      </div>
+      {hw.description && (
+        <div style={{ fontSize: 11, color: t.text, opacity: 0.75, marginBottom: 6, lineHeight: 1.4 }}>
+          {hw.description.length > 100 ? hw.description.slice(0, 100) + "..." : hw.description}
+        </div>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 11, color: t.text, opacity: 0.7 }}>
+        <span>⏰ {_fmtDateTime(hw.due_date)}</span>
+        <span>📚 {hwVocabs.length} үг</span>
+        <span style={{ color: t.accent, fontWeight: 700 }}>⚡ +{hw.xp_reward || 30} XP</span>
+      </div>
+      {hw.file_url && (
+        <a href={hw.file_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+          style={{ display: "inline-block", marginTop: 8, padding: "5px 10px", background: "#fff", borderRadius: 8, fontSize: 11, color: t.accent, fontWeight: 700, textDecoration: "none", border: `1px solid ${t.border}` }}>
+          📎 {hw.file_name || "Файл харах"}
+        </a>
+      )}
+      {isCompleted && submission && (
+        <div style={{ marginTop: 6, padding: 6, background: "#fff", borderRadius: 8, fontSize: 11, color: "#1b5e20" }}>
+          Оноо: <b>{submission.score}%</b> · +{hw.xp_reward || 30} XP авсан
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// 🏆 BAGSH — Шалгалт үүсгэх
+// ════════════════════════════════════════════════════════════════
+function CreateExamModal({ cls, vocabEntries, teacherId, onClose, onCreated, onToast }) {
+  const [title, setTitle] = useState(`Шалгалт ${new Date().toLocaleDateString("mn-MN")}`);
+  const [questionCount, setQuestionCount] = useState(10);
+  const [duration, setDuration] = useState(10);
+  const [selectedDates, setSelectedDates] = useState([TODAY]);
+  const [creating, setCreating] = useState(false);
+
+  const availableDates = useMemo(() => {
+    return [...new Set(vocabEntries.filter(v => v.date).map(v => v.date))].sort().reverse();
+  }, [vocabEntries]);
+
+  const toggleDate = (d) => {
+    setSelectedDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+  };
+
+  const scopedVocabs = vocabEntries.filter(v => selectedDates.includes(v.date));
+
+  const submit = async () => {
+    if (scopedVocabs.length < 3) {
+      onToast && onToast("❌ Дор хаяж 3 үг сонгоно уу", "error");
+      return;
+    }
+    setCreating(true);
+    const exam = {
+      id: `ex${Date.now()}`,
+      class_id: cls.id,
+      teacher_id: teacherId,
+      title: title.trim() || "Шалгалт",
+      question_count: questionCount,
+      duration_minutes: duration,
+      status: "pending",
+      vocab_scope_dates: selectedDates,
+      xp_per_correct: 5,
+    };
+    try {
+      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
+      const r = await fetch(`${SUPA_URL}/rest/v1/exams`, { method: "POST", headers: h, body: JSON.stringify(exam) });
+      if (!r.ok) throw new Error(await r.text());
+      onCreated && onCreated(exam);
+      onToast && onToast("✅ Шалгалт бэлдсэн. 'Эхлүүлэх' дарж шалгалтыг эхлүүлээрэй.", "success");
+      onClose();
+    } catch (e) {
+      onToast && onToast("❌ Алдаа: " + e.message, "error");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Overlay onClose={onClose} maxW={420}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <div style={{ fontSize: 26 }}>🏆</div>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#1a1a2e" }}>Шалгалт бэлдэх</div>
+          <div style={{ fontSize: 11, color: "#888" }}>AI асуулт автомат үүсгэнэ</div>
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>📌 ГАРЧИГ</div>
+        <input value={title} onChange={e => setTitle(e.target.value)} style={INP} />
+      </div>
+
+      {/* Vocab scope */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>📅 ҮГИЙН ХАМРАХ ӨДРҮҮД</div>
+        {availableDates.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: 14 }}>Үг байхгүй байна</div>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 120, overflowY: "auto", padding: 6, background: "#fafafa", borderRadius: 10 }}>
+            {availableDates.map(d => {
+              const isSel = selectedDates.includes(d);
+              const cnt = vocabEntries.filter(v => v.date === d).length;
+              return (
+                <button key={d} onClick={() => toggleDate(d)} className="k-press"
+                  style={{
+                    background: isSel ? "#7c3aed" : "#fff",
+                    color: isSel ? "#fff" : "#555",
+                    border: isSel ? "2px solid #7c3aed" : "2px solid #e0e0e0",
+                    borderRadius: 8, padding: "5px 10px",
+                    fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  }}>
+                  {d.slice(5)} ({cnt})
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ marginTop: 6, fontSize: 11, color: scopedVocabs.length >= 3 ? "#43a047" : "#c62828", fontWeight: 700 }}>
+          {scopedVocabs.length >= 3 ? `✓ ${scopedVocabs.length} үг сонгогдсон` : `⚠️ Дор хаяж 3 үг хэрэгтэй (одоо ${scopedVocabs.length})`}
+        </div>
+      </div>
+
+      {/* Question count */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>❓ АСУУЛТЫН ТОО ({questionCount})</div>
+        <input type="range" min={5} max={30} value={questionCount} onChange={e => setQuestionCount(+e.target.value)}
+          style={{ width: "100%", accentColor: "#7c3aed" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#888", marginTop: 2 }}>
+          <span>5</span><span>30</span>
+        </div>
+      </div>
+
+      {/* Duration */}
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>⏱️ ХУГАЦАА (МИНУТ)</div>
+        <div style={{ display: "flex", gap: 5 }}>
+          {[5, 10, 15, 20, 30].map(m => (
+            <button key={m} onClick={() => setDuration(m)} className="k-btn k-press"
+              style={{
+                flex: 1, padding: "8px", borderRadius: 10,
+                border: duration === m ? "2px solid #7c3aed" : "2px solid #e0e0e0",
+                background: duration === m ? "#f5f0ff" : "#fff",
+                color: duration === m ? "#7c3aed" : "#666",
+                fontWeight: 800, fontSize: 13, cursor: "pointer"
+              }}>
+              {m}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onClose} className="k-btn k-press"
+          style={{ ...bs("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+        <button onClick={submit} disabled={creating || scopedVocabs.length < 3} className="k-btn k-press"
+          style={{ ...bs("#7c3aed", "#fff"), flex: 2, justifyContent: "center", fontWeight: 800, opacity: (creating || scopedVocabs.length < 3) ? 0.5 : 1, boxShadow: "0 4px 0 #5b21b6" }}>
+          {creating ? "⏳ Бэлдэж байна..." : "✨ Үүсгэх"}
+        </button>
+      </div>
+    </Overlay>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// 🔥 EXAM ROOM — Шалгалтын өрөө (багшид: эхлүүлэх, харах, үр дүн)
+// ════════════════════════════════════════════════════════════════
+function ExamRoomModal({ exam, cls, students, vocabEntries, examSubmissions, isOwner, onClose, onRefresh, onToast }) {
+  const [starting, setStarting] = useState(false);
+
+  const startExam = async () => {
+    if (!window.confirm(`"${exam.title}" шалгалтыг ОДОО эхлүүлэх үү?\n${exam.duration_minutes} минут хүртэл өгнө.`)) return;
+    setStarting(true);
+    const updates = {
+      status: "active",
+      started_at: new Date().toISOString(),
+    };
+    try {
+      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json" };
+      await fetch(`${SUPA_URL}/rest/v1/exams?id=eq.${exam.id}`, { method: "PATCH", headers: h, body: JSON.stringify(updates) });
+      onRefresh && onRefresh();
+      onToast && onToast("🚀 Шалгалт эхэллээ! Сурагчдад автомат харагдана.", "success");
+    } catch (e) {
+      onToast && onToast("❌ Алдаа: " + e.message, "error");
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  const endExam = async () => {
+    if (!window.confirm("Шалгалтыг дуусгах уу?")) return;
+    try {
+      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json" };
+      await fetch(`${SUPA_URL}/rest/v1/exams?id=eq.${exam.id}`, {
+        method: "PATCH", headers: h,
+        body: JSON.stringify({ status: "finished", ended_at: new Date().toISOString() })
+      });
+      onRefresh && onRefresh();
+      onToast && onToast("✅ Шалгалт дууслаа", "success");
+    } catch (e) {
+      onToast && onToast("❌ Алдаа: " + e.message, "error");
+    }
+  };
+
+  const deleteExam = async () => {
+    if (!window.confirm("Шалгалтыг устгах уу? Бүх үр дүн алга болно.")) return;
+    try {
+      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` };
+      await fetch(`${SUPA_URL}/rest/v1/exam_submissions?exam_id=eq.${exam.id}`, { method: "DELETE", headers: h });
+      await fetch(`${SUPA_URL}/rest/v1/exams?id=eq.${exam.id}`, { method: "DELETE", headers: h });
+      onRefresh && onRefresh();
+      onToast && onToast("✅ Устгагдлаа", "success");
+      onClose();
+    } catch (e) {
+      onToast && onToast("❌ Алдаа: " + e.message, "error");
+    }
+  };
+
+  // Үр дүн
+  const submissions = examSubmissions.filter(s => s.exam_id === exam.id);
+  const sortedSubs = [...submissions].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  return (
+    <Overlay onClose={onClose} maxW={440}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <div style={{ fontSize: 26 }}>🏆</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 15, color: "#1a1a2e" }}>{exam.title}</div>
+          <div style={{ fontSize: 11, color: "#888" }}>{exam.question_count} асуулт · {exam.duration_minutes} минут</div>
+        </div>
+        {isOwner && exam.status !== "active" && (
+          <button onClick={deleteExam} className="k-btn k-press" style={bs("#fff0f0", "#e53935", "#ffcdd2", true)}>🗑️</button>
+        )}
+      </div>
+
+      {/* Status badge */}
+      <div style={{ marginBottom: 12 }}>
+        {exam.status === "pending" && (
+          <div style={{ background: "#fff3cd", color: "#b8860b", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, textAlign: "center" }}>
+            ⏳ Эхлүүлэхийг хүлээж байна
+          </div>
+        )}
+        {exam.status === "active" && (
+          <div style={{ background: "#e8f5e9", color: "#1b5e20", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, textAlign: "center", animation: "kPulse 2s ease-in-out infinite" }}>
+            🔥 ИДЭВХТЭЙ — {submissions.length}/{students.length} өгсөн
+          </div>
+        )}
+        {exam.status === "finished" && (
+          <div style={{ background: "#e3f2fd", color: "#1565c0", padding: "8px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700, textAlign: "center" }}>
+            🏁 Дууссан
+          </div>
+        )}
+      </div>
+
+      {/* Action buttons */}
+      {isOwner && exam.status === "pending" && (
+        <button onClick={startExam} disabled={starting} className="k-btn k-press"
+          style={{ ...bs("#43a047", "#fff"), width: "100%", justifyContent: "center", padding: 14, fontWeight: 800, fontSize: 14, marginBottom: 12, boxShadow: "0 4px 0 #2e7d32" }}>
+          {starting ? "⏳ Эхлүүлж байна..." : "🚀 ШАЛГАЛТ ЭХЛҮҮЛЭХ"}
+        </button>
+      )}
+      {isOwner && exam.status === "active" && (
+        <button onClick={endExam} className="k-btn k-press"
+          style={{ ...bs("#e53935", "#fff"), width: "100%", justifyContent: "center", padding: 14, fontWeight: 800, fontSize: 14, marginBottom: 12, boxShadow: "0 4px 0 #b71c1c" }}>
+          🏁 ЭРТ ДУУСГАХ
+        </button>
+      )}
+
+      {/* Leaderboard (finished/active) */}
+      {(exam.status === "active" || exam.status === "finished") && sortedSubs.length > 0 && (
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#1a1a2e", marginBottom: 8 }}>🏆 Тэргүүн жагсаалт</div>
+          {/* Top 3 medal */}
+          {sortedSubs.length >= 1 && exam.status === "finished" && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "flex-end", justifyContent: "center" }}>
+              {sortedSubs[1] && (
+                <PodiumCard rank={2} sub={sortedSubs[1]} students={students} color="#9e9e9e" emoji="🥈" />
+              )}
+              {sortedSubs[0] && (
+                <PodiumCard rank={1} sub={sortedSubs[0]} students={students} color="#ffc107" emoji="🥇" big />
+              )}
+              {sortedSubs[2] && (
+                <PodiumCard rank={3} sub={sortedSubs[2]} students={students} color="#bf8957" emoji="🥉" />
+              )}
+            </div>
+          )}
+          <div style={{ maxHeight: "35vh", overflowY: "auto" }}>
+            {sortedSubs.map((s, i) => {
+              const st = students.find(x => x.id === s.student_id);
+              return (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: i < 3 ? "#fff3cd" : "#fff", borderRadius: 10, marginBottom: 4, border: i < 3 ? "1px solid #ffe082" : "1px solid #f0f0f0" }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: i === 0 ? "#b8860b" : "#888", width: 22, textAlign: "center" }}>{i + 1}</div>
+                  <div style={{ flex: 1, fontWeight: 700, fontSize: 13 }}>{st?.name || "—"}</div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "#43a047" }}>{s.correct_count}/{s.total_count}</div>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: s.score >= 80 ? "#43a047" : s.score >= 60 ? "#f57c00" : "#c62828" }}>{s.score}%</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Pending students */}
+      {exam.status === "active" && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontWeight: 800, fontSize: 12, color: "#888", marginBottom: 6 }}>
+            ⏳ Хүлээгдэж буй: {students.filter(s => !submissions.find(sub => sub.student_id === s.id)).length}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {students.filter(s => !submissions.find(sub => sub.student_id === s.id)).map(s => (
+              <span key={s.id} style={{ background: "#f0f0f0", padding: "3px 8px", borderRadius: 8, fontSize: 11 }}>{s.name}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </Overlay>
+  );
+}
+
+function PodiumCard({ rank, sub, students, color, emoji, big }) {
+  const st = students.find(x => x.id === sub.student_id);
+  return (
+    <div className="k-pop" style={{
+      flex: 1, maxWidth: big ? 130 : 100,
+      background: `linear-gradient(180deg, ${color}33, ${color}11)`,
+      border: `2px solid ${color}`,
+      borderRadius: 14,
+      padding: big ? 12 : 8,
+      textAlign: "center",
+      height: big ? 130 : 100,
+      display: "flex", flexDirection: "column", justifyContent: "center",
+    }}>
+      <div style={{ fontSize: big ? 32 : 24, marginBottom: 4 }}>{emoji}</div>
+      <div style={{ fontWeight: 800, fontSize: big ? 13 : 11, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{st?.name || "—"}</div>
+      <div style={{ fontSize: big ? 18 : 14, fontWeight: 900, color: color }}>{sub.score}%</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════
+// 🧪 SURAGCH — Шалгалт өгөх (бодит цаг)
+// ════════════════════════════════════════════════════════════════
+function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onToast }) {
+  const [stage, setStage] = useState("loading"); // loading | exam | done
+  const [questions, setQuestions] = useState([]);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [remainingSec, setRemainingSec] = useState((exam.duration_minutes || 10) * 60);
+  const [result, setResult] = useState(null);
+  const [showTranslate, setShowTranslate] = useState({}); // {wordKey: true}
+
+  // Тухайн шалгалтын vocab
+  const examVocabs = useMemo(() => {
+    const dates = exam.vocab_scope_dates || [];
+    return vocabEntries.filter(v => dates.includes(v.date));
+  }, [exam, vocabEntries]);
+
+  // Recent vocabs (бусад өдрөөс)
+  const recentVocabs = useMemo(() => {
+    const dates = exam.vocab_scope_dates || [];
+    return vocabEntries.filter(v => v.date && !dates.includes(v.date)).slice(0, 15);
+  }, [exam, vocabEntries]);
+
+  // Асуултуудыг үүсгэх
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const vocabs = examVocabs.filter(v => v.type !== "grammar");
+      const grammars = examVocabs.filter(v => v.type === "grammar");
+      try {
+        const qs = await generateExamQuestions({
+          vocabs,
+          grammars,
+          count: exam.question_count || 10,
+          level: student.level || 0,
+          recentVocabs,
+        });
+        if (cancelled) return;
+        if (!qs || qs.length === 0) {
+          // Fallback — гар хийц асуулт үүсгэе
+          const fallback = generateFallbackQuestions(vocabs, exam.question_count || 10);
+          setQuestions(fallback);
+        } else {
+          setQuestions(qs);
+        }
+        setStage("exam");
+      } catch (e) {
+        const fallback = generateFallbackQuestions(vocabs, exam.question_count || 10);
+        setQuestions(fallback);
+        setStage("exam");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Timer
+  useEffect(() => {
+    if (stage !== "exam") return;
+    const interval = setInterval(() => {
+      setRemainingSec(s => {
+        if (s <= 1) {
+          clearInterval(interval);
+          submitExam(true);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [stage]);
+
+  const setAnswer = (val) => {
+    const q = questions[currentIdx];
+    setAnswers(prev => ({ ...prev, [currentIdx]: val }));
+  };
+
+  const next = () => {
+    if (currentIdx + 1 >= questions.length) submitExam(false);
+    else setCurrentIdx(i => i + 1);
+  };
+
+  const submitExam = async (timeOut) => {
+    let correct = 0;
+    const total = questions.length;
+    questions.forEach((q, i) => {
+      const a = (answers[i] || "").toString().trim().toLowerCase();
+      const c = (q.correct || "").toString().trim().toLowerCase();
+      if (a === c) {
+        correct++;
+      } else if (Array.isArray(q.alternatives)) {
+        const alts = q.alternatives.map(x => x.toString().trim().toLowerCase());
+        if (alts.includes(a)) correct++;
+      }
+    });
+    const score = total > 0 ? Math.round((correct / total) * 100) : 0;
+    const xpEarned = correct * (exam.xp_per_correct || 5);
+
+    const submission = {
+      id: `es${Date.now()}`,
+      exam_id: exam.id,
+      student_id: student.id,
+      answers,
+      correct_count: correct,
+      total_count: total,
+      score,
+      xp_earned: xpEarned,
+    };
+    try {
+      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation" };
+      await fetch(`${SUPA_URL}/rest/v1/exam_submissions`, { method: "POST", headers: h, body: JSON.stringify(submission) });
+      // Student xp шинэчилэх
+      const newXp = (student.xp || 0) + xpEarned;
+      await fetch(`${SUPA_URL}/rest/v1/students?id=eq.${student.id}`, { method: "PATCH", headers: h, body: JSON.stringify({ xp: newXp }) });
+      _db.students = _db.students.map(s => s.id === student.id ? { ...s, xp: newXp } : s);
+    } catch (e) {
+      console.error("Exam submit err", e);
+    }
+    setResult({ correct, total, score, xpEarned, timeOut });
+    setStage("done");
+    if (onComplete) onComplete({ score, xpEarned });
+  };
+
+  // ═══ LOADING ═══
+  if (stage === "loading") {
+    return (
+      <div style={{ minHeight: "100vh", background: t.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "system-ui" }}>
+        <div className="k-bouncy" style={{ fontSize: 80, marginBottom: 16 }}>📚</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: t.text, marginBottom: 6 }}>Асуултууд бэлдэж байна...</div>
+        <div style={{ fontSize: 12, color: t.text, opacity: 0.6 }}>AI-аар асуулт үүсгэж байна, түр хүлээнэ үү</div>
+        <div style={{ display: "flex", gap: 6, marginTop: 16 }}>
+          {[0, 1, 2].map(i => (
+            <div key={i} style={{ width: 10, height: 10, borderRadius: "50%", background: t.accent, animation: `kBounce 1s ease-in-out ${i * 0.15}s infinite` }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ DONE ═══
+  if (stage === "done" && result) {
+    const isGreat = result.score >= 80;
+    const isGood = result.score >= 60;
+    return (
+      <div style={{ minHeight: "100vh", background: t.bg, padding: 16, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto" }}>
+        <div className="k-pop" style={{ background: "#fff", borderRadius: 22, padding: 26, textAlign: "center", border: `2px solid ${t.border}`, marginTop: 30 }}>
+          <div className="k-bouncy" style={{ fontSize: 80, marginBottom: 12 }}>
+            {isGreat ? "🏆" : isGood ? "🎉" : "💪"}
+          </div>
+          <div style={{ fontWeight: 900, fontSize: 24, color: t.accent, marginBottom: 6 }}>
+            {isGreat ? "Гайхалтай!" : isGood ? "Сайн!" : "Хичээ!"}
+          </div>
+          {result.timeOut && <div style={{ background: "#fff3cd", color: "#b8860b", padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, display: "inline-block", marginBottom: 10 }}>⏰ Хугацаа дууссан</div>}
+          <div style={{ fontSize: 14, color: t.text, opacity: 0.7, marginBottom: 18 }}>Шалгалт амжилттай өгсөн</div>
+          <div style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}cc)`, borderRadius: 16, padding: 20, marginBottom: 14 }}>
+            <div style={{ color: "#fff", fontSize: 13, opacity: 0.9, fontWeight: 700 }}>ОНОО</div>
+            <div style={{ color: "#fff", fontSize: 50, fontWeight: 900, lineHeight: 1, marginTop: 4 }}>{result.score}<span style={{ fontSize: 24 }}>/100</span></div>
+            <div style={{ color: "#fff", fontSize: 13, opacity: 0.9, marginTop: 8 }}>{result.correct} зөв / {result.total} нийт</div>
+            <div style={{ color: "#fff", fontSize: 16, fontWeight: 800, marginTop: 10, background: "rgba(255,255,255,0.2)", borderRadius: 10, padding: "6px 12px", display: "inline-block" }}>
+              +{result.xpEarned} XP
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: t.text, opacity: 0.6 }}>Үр дүн ангид автомат харагдана</div>
+        </div>
+      </div>
+    );
+  }
+
+  // ═══ EXAM ═══
+  if (stage !== "exam" || questions.length === 0) return null;
+  const q = questions[currentIdx];
+  const userAns = answers[currentIdx] || "";
+  const mins = Math.floor(remainingSec / 60);
+  const secs = remainingSec % 60;
+  const lowTime = remainingSec < 60;
+
+  return (
+    <div style={{ minHeight: "100vh", background: t.bg, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto", padding: 14 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: t.text }}>📚 {currentIdx + 1}/{questions.length}</div>
+        <div className={lowTime ? "k-bouncy" : ""} style={{ background: lowTime ? "#ffcdd2" : t.soft, color: lowTime ? "#c62828" : t.accent, padding: "5px 12px", borderRadius: 10, fontWeight: 800, fontSize: 14 }}>
+          ⏱️ {mins}:{String(secs).padStart(2, "0")}
+        </div>
+      </div>
+
+      {/* Progress */}
+      <div style={{ height: 6, background: t.soft, borderRadius: 3, overflow: "hidden", marginBottom: 16 }}>
+        <div style={{ height: "100%", width: `${(currentIdx / questions.length) * 100}%`, background: t.accent, transition: "width .4s ease" }} />
+      </div>
+
+      {/* Question */}
+      <div className="k-fade" key={currentIdx} style={{ background: "#fff", borderRadius: 18, padding: 18, marginBottom: 14, border: `2px solid ${t.border}` }}>
+        <div style={{ fontSize: 11, color: t.accent, fontWeight: 800, marginBottom: 8, letterSpacing: 1 }}>{getQuestionTypeLabel(q.type)}</div>
+        <div style={{ fontSize: 14, color: t.text, marginBottom: 12, lineHeight: 1.5 }}>{q.question || q.label}</div>
+
+        {/* Audio play if available */}
+        {q.audio && (
+          <button onClick={() => speakKr(q.audio)} className="k-btn k-press"
+            style={{ background: t.accent, color: "#fff", border: "none", borderRadius: 12, padding: "10px 20px", fontSize: 14, fontWeight: 700, cursor: "pointer", marginBottom: 12, display: "flex", alignItems: "center", gap: 6 }}>
+            🔊 Сонсох
+          </button>
+        )}
+
+        {/* For fill_blank/sentence with translation */}
+        {q.sentence && (
+          <div style={{ background: t.soft, borderRadius: 12, padding: 12, marginBottom: 12, fontSize: 18, fontWeight: 800, color: t.text, textAlign: "center" }}>
+            {q.sentence}
+          </div>
+        )}
+        {q.prompt_text && (
+          <div style={{ background: t.soft, borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 22, fontWeight: 800, color: t.text, textAlign: "center" }}>
+            {q.prompt_text}
+          </div>
+        )}
+
+        {/* Answer area */}
+        {q.type === "multiple_choice" || q.type === "fill_blank" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {(q.options || []).map((opt, i) => {
+              const isSel = userAns === opt;
+              return (
+                <div key={i} onClick={() => setAnswer(opt)} className="k-press"
+                  style={{
+                    background: isSel ? t.soft : "#fff",
+                    color: isSel ? t.accent : t.text,
+                    border: isSel ? `2px solid ${t.accent}` : `2px solid ${t.border}`,
+                    borderRadius: 12, padding: "12px 8px",
+                    fontSize: 14, fontWeight: 700,
+                    textAlign: "center", cursor: "pointer",
+                    transition: "all .15s",
+                  }}>
+                  {opt}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <input value={userAns} onChange={e => setAnswer(e.target.value)} placeholder="Хариугаа бичнэ үү..."
+            style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: `2px solid ${t.border}`, fontSize: 16, fontWeight: 600, outline: "none", textAlign: "center", boxSizing: "border-box" }} />
+        )}
+
+        {/* Translation help (хэрэв sentence-тэй бол) */}
+        {q.translation && (
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => setShowTranslate(s => ({ ...s, [currentIdx]: !s[currentIdx] }))} className="k-btn k-press"
+              style={{ background: "#fff", color: t.accent, border: `1px solid ${t.border}`, borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+              💡 {showTranslate[currentIdx] ? "Нуух" : "Утга харах"}
+            </button>
+            {showTranslate[currentIdx] && (
+              <div style={{ marginTop: 6, padding: 8, background: "#fff8e1", borderRadius: 8, fontSize: 12, color: "#b8860b" }}>
+                {q.translation}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Next button */}
+      <button onClick={next} disabled={!userAns}
+        className="k-btn k-press"
+        style={{
+          width: "100%", padding: 14, borderRadius: 14, border: "none",
+          background: userAns ? t.accent : "#e0e0e0",
+          color: "#fff", fontWeight: 800, fontSize: 14, cursor: userAns ? "pointer" : "default",
+          boxShadow: userAns ? `0 4px 0 ${t.border}` : "none",
+        }}>
+        {currentIdx + 1 >= questions.length ? "🏁 Дуусгах" : "Дараагийн →"}
+      </button>
+    </div>
+  );
+}
+
+function getQuestionTypeLabel(type) {
+  return ({
+    multiple_choice: "🔘 СОНГОЛТ",
+    translate_kr_mn: "🇰🇷 → 🇲🇳 ОРЧУУЛАХ",
+    translate_mn_kr: "🇲🇳 → 🇰🇷 ОРЧУУЛАХ",
+    fill_blank: "✏️ ХООСОН ЗАЙГ ГҮЙЦЭЭ",
+  })[type] || "АСУУЛТ";
+}
+
+// Fallback асуулт үүсгэгч (Gemini API ажиллахгүй үед)
+function generateFallbackQuestions(vocabs, count) {
+  if (!vocabs || vocabs.length < 2) return [];
+  const list = [...vocabs].sort(() => Math.random() - 0.5).slice(0, count);
+  return list.map(target => {
+    const others = vocabs.filter(v => v.word !== target.word).sort(() => Math.random() - 0.5).slice(0, 3);
+    return {
+      type: "multiple_choice",
+      question: `${target.word}-ийн утга юу вэ?`,
+      audio: target.word,
+      options: [...others.map(o => o.meaning), target.meaning].sort(() => Math.random() - 0.5),
+      correct: target.meaning,
+    };
+  });
+}
+
 function AuthScreen({onAuth}){
+
   const [mode,setMode]=useState("teacher");
   const [email,setEmail]=useState("");
   const [pass,setPass]=useState("");
@@ -1186,13 +3002,6 @@ function AuthScreen({onAuth}){
     if(st.rd.toUpperCase()!==fRd.trim().toUpperCase()){setErr("Регистрийн дугаар буруу байна.");return;}
     setFResult({name:st.name,password:st.password});
   };
-
-  const tabStyle=(m)=>({
-    flex:1,padding:"8px 2px",borderRadius:9,border:"none",cursor:"pointer",fontSize:11,
-    background:mode===m?"#fff":"transparent",
-    color:mode===m?(m==="teacher"?"#7c3aed":m==="register"?"#e91e8c":"#2196f3"):"#888",
-    fontWeight:mode===m?700:400,
-  });
 
   if(regDone) return(
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#81c784 0%,#43a047 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",padding:16,position:"relative",overflow:"hidden"}}>
@@ -1798,7 +3607,7 @@ function PlantSection({s,t,isAdmin,isStudent,upd,hideUI}){
 }
 
 // ── CARD CONTENT ──────────────────────────────────────
-function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDays,vocabEntries,sessions,present,learnedVocab,totalVocab,onToggleAtt,hideUI,setShowPay,setEditNotes,editNotes,notes,setNotes,weakSearch,setWeakSearch,showWeakDD,setShowWeakDD}){
+function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDays,vocabEntries,sessions,present,learnedVocab,totalVocab,onToggleAtt,hideUI,setShowPay,setEditNotes,editNotes,notes,setNotes,weakSearch,setWeakSearch,showWeakDD,setShowWeakDD,homeworks,homeworkSubs,exams,examSubs}){
   const balance=(s.total_fee||0)-(s.total_paid||0);
   const overdue=!!(s.next_due&&s.next_due<TODAY);
   const showPayment=isSuperAdmin||(!isAdmin);
@@ -1897,6 +3706,42 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
         <div style={{marginTop:5,fontSize:10,color:t.text,opacity:.5,textAlign:"right"}}>{present}/{sessions.length} ирсэн</div>
         {sessions.length>0&&<AttendanceStats present={present} total={sessions.length} allPresent={allPresent} card={t.card}/>}
       </div>
+
+      {/* Гэрийн даалгавар + Шалгалт статистик */}
+      {(homeworks||exams)&&(() => {
+        const myClassId=s.class_id;
+        const myHws=(homeworks||[]).filter(h=>h.class_id===myClassId);
+        const mySubs=(homeworkSubs||[]).filter(hs=>hs.student_id===s.id);
+        const submittedIds=new Set(mySubs.map(x=>x.homework_id));
+        const completedHws=myHws.filter(h=>submittedIds.has(h.id)).length;
+        const pendingHws=myHws.filter(h=>!submittedIds.has(h.id)&&new Date(h.due_date)>new Date()).length;
+        const myExSubs=(examSubs||[]).filter(es=>es.student_id===s.id);
+        const avgExScore=myExSubs.length>0?Math.round(myExSubs.reduce((a,b)=>a+(b.score||0),0)/myExSubs.length):0;
+        const totalXpFromExams=myExSubs.reduce((a,b)=>a+(b.xp_earned||0),0);
+        if(myHws.length===0&&myExSubs.length===0)return null;
+        return(
+          <div style={{background:t.soft,borderRadius:14,padding:12,marginBottom:10}}>
+            <div style={{fontWeight:700,fontSize:12,color:t.text,marginBottom:8}}>🎓 Сургалтын идэвх</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+              <div style={{textAlign:"center",background:t.card,borderRadius:9,padding:"7px 4px"}}>
+                <div style={{fontSize:15,fontWeight:800,color:t.accent}}>{completedHws}<span style={{fontSize:10,opacity:.6}}>/{myHws.length}</span></div>
+                <div style={{fontSize:9,color:"#888",fontWeight:700}}>📝 Даалгавар</div>
+                {pendingHws>0&&<div style={{fontSize:8,color:"#e65100",fontWeight:700,marginTop:1}}>⏳ {pendingHws} хүлээгдэж</div>}
+              </div>
+              <div style={{textAlign:"center",background:t.card,borderRadius:9,padding:"7px 4px"}}>
+                <div style={{fontSize:15,fontWeight:800,color:"#43a047"}}>{myExSubs.length}</div>
+                <div style={{fontSize:9,color:"#888",fontWeight:700}}>🏆 Шалгалт</div>
+                {myExSubs.length>0&&<div style={{fontSize:8,color:"#43a047",fontWeight:700,marginTop:1}}>дундаж {avgExScore}%</div>}
+              </div>
+              <div style={{textAlign:"center",background:t.card,borderRadius:9,padding:"7px 4px"}}>
+                <div style={{fontSize:15,fontWeight:800,color:"#7c3aed"}}>+{totalXpFromExams}</div>
+                <div style={{fontSize:9,color:"#888",fontWeight:700}}>⚡ XP оноо</div>
+                <div style={{fontSize:8,color:"#7c3aed",fontWeight:700,marginTop:1}}>шалгалтаас</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Payment - superadmin болон сурагч өөрөө л харна */}
       {showPayment&&(
@@ -2028,7 +3873,7 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
 }
 
 // ── STUDENT VIEW ──────────────────────────────────────
-function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabEntries,classmates,classColor}){
+function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabEntries,classmates,classColor,homeworks,homeworkSubs,exams,examSubs,refreshAll}){
   const [tab,setTab]=useState("card");
   const [attM,setAttM]=useState(attMonth);
   const [showChangePw,setShowChangePw]=useState(false);
@@ -2037,6 +3882,10 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
   const [startDate,setStartDate]=useState(s.enroll_date||"");
   const [weakSearch,setWeakSearch]=useState("");
   const [showWeakDD,setShowWeakDD]=useState(false);
+  const [showPractice,setShowPractice]=useState(false);
+  const [activeHw,setActiveHw]=useState(null);
+  const [activeExam,setActiveExam]=useState(null);
+  const [examFinishToast,setExamFinishToast]=useState(null);
   const t=getT(s.theme_id);
   const sessions=getSessions(classDays,attM);
   const present=sessions.filter(item=>(s.attendance||{})[item.date]).length;
@@ -2061,7 +3910,11 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
   return(
     <div style={{minHeight:"100vh",background:t.bg,fontFamily:"system-ui",maxWidth:480,margin:"0 auto",padding:14,overflowX:"hidden",boxSizing:"border-box"}}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-        <button onClick={goBack} style={bs(t.card,t.text,t.border,true)}>← Гарах</button>
+        <button onClick={()=>{
+          if(window.confirm("Системээс гарах уу? Дахин нэвтрэхэд и-мэйл, нууц үгээ оруулах хэрэгтэй.")){
+            goBack();
+          }
+        }} style={bs(t.card,t.text,t.border,true)}>← Гарах</button>
         <div style={{flex:1,fontWeight:700,fontSize:15,color:t.text,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
         <button onClick={()=>setShowThemes(true)} style={bs(t.soft,t.accent,t.border,true)}>🎨</button>
         <button onClick={()=>setShowChangePw(true)} style={bs(t.soft,t.accent,t.border,true)}>🔐</button>
@@ -2115,20 +3968,216 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
           </div>
         </Overlay>
       )}
-      <div style={{display:"flex",gap:5,marginBottom:14,background:t.soft,borderRadius:12,padding:4}}>
-        {[["card","📋"],["daily","📅"],["vocab","📚"],["weak","⚠️"],["leaderboard","🏆"]].map(item=>(
-          <button key={item[0]} onClick={()=>setTab(item[0])} className="k-press"
-            style={{flex:1,padding:"9px 2px",borderRadius:9,border:"none",
-              background:tab===item[0]?t.card:"transparent",
-              color:tab===item[0]?t.accent:t.text,
-              fontWeight:tab===item[0]?700:500,
-              fontSize:16,cursor:"pointer",transition:"all .15s",
-              boxShadow:tab===item[0]?`0 2px 8px ${t.accent}33`:"none"}}>{item[1]}</button>
-        ))}
+      {/* ── ИДЭВХТЭЙ ШАЛГАЛТЫН POPUP ── */}
+      {(() => {
+        const myClassExams=(exams||[]).filter(e=>e.class_id===s.class_id&&e.status==="active");
+        const mySubsIds=new Set((examSubs||[]).filter(es=>es.student_id===s.id).map(es=>es.exam_id));
+        const upcomingExam=myClassExams.find(e=>!mySubsIds.has(e.id));
+        if(!upcomingExam||activeExam)return null;
+        return(
+          <div className="k-pop" style={{
+            background:`linear-gradient(135deg,#ff5722,#e64a19)`,
+            color:"#fff",borderRadius:18,padding:18,marginBottom:14,
+            boxShadow:"0 8px 24px rgba(229,57,53,0.35)",
+            border:"3px solid #fff",
+            animation:"kPulse 2s ease-in-out infinite",
+          }}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+              <div className="k-bouncy" style={{fontSize:36}}>🏆</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,fontWeight:700,opacity:.9,letterSpacing:1}}>ИДЭВХТЭЙ ШАЛГАЛТ</div>
+                <div style={{fontSize:16,fontWeight:900}}>{upcomingExam.title}</div>
+              </div>
+            </div>
+            <div style={{fontSize:12,opacity:.95,marginBottom:10}}>
+              ⏱️ {upcomingExam.duration_minutes} минут · {upcomingExam.question_count} асуулт
+            </div>
+            <button onClick={()=>setActiveExam(upcomingExam)} className="k-btn k-press"
+              style={{width:"100%",background:"#fff",color:"#e64a19",border:"none",borderRadius:12,padding:"12px",fontWeight:900,fontSize:14,cursor:"pointer",boxShadow:"0 4px 0 rgba(0,0,0,0.2)"}}>
+              🚀 ШАЛГАЛТ ӨГӨХ
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* ── СОЛОНГОС ХЭЛЭЭ БЭЛДЭХ ТОВЧ ── */}
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button onClick={()=>setShowPractice(true)} className="k-btn k-press"
+          style={{
+            flex:1,background:`linear-gradient(135deg,${t.accent},${t.accent}cc)`,
+            color:"#fff",border:"none",borderRadius:14,padding:"12px",
+            fontWeight:800,fontSize:13,cursor:"pointer",
+            boxShadow:`0 4px 0 ${t.border}`,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:6,
+          }}>
+          🎓 Солонгос хэлээ бэлдэх
+        </button>
+      </div>
+
+      <div style={{display:"flex",gap:5,marginBottom:14,background:t.soft,borderRadius:12,padding:4,overflowX:"auto"}}>
+        {[["card","📋"],["daily","📅"],["homework","📝"],["vocab","📚"],["weak","⚠️"],["leaderboard","🏆"]].map(item=>{
+          // Даалгавар tab дээр badge — хийгээгүй даалгаврын тоо
+          const pendingHwCount=item[0]==="homework"?(() => {
+            const myHws=(homeworks||[]).filter(h=>h.class_id===s.class_id);
+            const submittedIds=new Set((homeworkSubs||[]).filter(hs=>hs.student_id===s.id).map(hs=>hs.homework_id));
+            return myHws.filter(h=>!submittedIds.has(h.id)&&new Date(h.due_date)>new Date()).length;
+          })():0;
+          return(
+            <button key={item[0]} onClick={()=>setTab(item[0])} className="k-press"
+              style={{flex:1,minWidth:44,padding:"9px 2px",borderRadius:9,border:"none",position:"relative",
+                background:tab===item[0]?t.card:"transparent",
+                color:tab===item[0]?t.accent:t.text,
+                fontWeight:tab===item[0]?700:500,
+                fontSize:16,cursor:"pointer",transition:"all .15s",
+                boxShadow:tab===item[0]?`0 2px 8px ${t.accent}33`:"none"}}>{item[1]}
+              {pendingHwCount>0&&<span style={{position:"absolute",top:1,right:3,background:"#e53935",color:"#fff",borderRadius:8,padding:"0 4px",fontSize:9,fontWeight:800,minWidth:14,textAlign:"center"}}>{pendingHwCount}</span>}
+            </button>
+          );
+        })}
       </div>
       {tab==="daily"&&<DailyCalendarTab vocabEntries={vocabEntries} t={t} classDays={classDays}/>}
       {tab==="leaderboard"&&<div className="k-fade" style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}><div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div><Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/></div>}
       {tab==="vocab"&&<VocabTab vocabEntries={vocabEntries} t={t}/>}
+
+      {/* ── ДААЛГАВАР TAB ── */}
+      {tab==="homework"&&(() => {
+        const myHws=(homeworks||[]).filter(h=>h.class_id===s.class_id).sort((a,b)=>(b.created_at||"").localeCompare(a.created_at||""));
+        const mySubs=(homeworkSubs||[]).filter(hs=>hs.student_id===s.id);
+        const subMap=Object.fromEntries(mySubs.map(sub=>[sub.homework_id,sub]));
+        const pendingHws=myHws.filter(h=>!subMap[h.id]&&new Date(h.due_date)>new Date());
+        const completedHws=myHws.filter(h=>subMap[h.id]);
+        const overdueHws=myHws.filter(h=>!subMap[h.id]&&new Date(h.due_date)<=new Date());
+
+        return(
+          <div className="k-fade" style={{background:t.card,borderRadius:18,padding:14,border:`2px solid ${t.border}`}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{fontWeight:800,fontSize:15,color:t.text}}>📝 Гэрийн даалгавар</div>
+              <div style={{fontSize:11,color:t.text,opacity:.6}}>{myHws.length} нийт</div>
+            </div>
+
+            {myHws.length===0&&(
+              <div style={{textAlign:"center",padding:"30px 0"}}>
+                <div style={{fontSize:48,opacity:.4,marginBottom:8}}>🌙</div>
+                <div style={{fontSize:13,color:t.text,opacity:.6}}>Даалгавар байхгүй байна</div>
+              </div>
+            )}
+
+            {pendingHws.length>0&&(
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:800,color:t.accent,marginBottom:6,letterSpacing:.5}}>🎯 ХҮЛЭЭГДЭЖ БУЙ ({pendingHws.length})</div>
+                {pendingHws.map(hw=>(
+                  <StudentHomeworkCard key={hw.id} hw={hw} vocabEntries={vocabEntries} t={t}
+                    isCompleted={false} submission={null}
+                    onStart={(h,vs)=>setActiveHw({hw:h,vocabs:vs})}/>
+                ))}
+              </div>
+            )}
+
+            {completedHws.length>0&&(
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:800,color:"#43a047",marginBottom:6,letterSpacing:.5}}>✅ ХИЙСЭН ({completedHws.length})</div>
+                {completedHws.map(hw=>(
+                  <StudentHomeworkCard key={hw.id} hw={hw} vocabEntries={vocabEntries} t={t}
+                    isCompleted={true} submission={subMap[hw.id]}
+                    onStart={()=>{}}/>
+                ))}
+              </div>
+            )}
+
+            {overdueHws.length>0&&(
+              <div>
+                <div style={{fontSize:11,fontWeight:800,color:"#c62828",marginBottom:6,letterSpacing:.5}}>❌ ХОЦОРСОН ({overdueHws.length})</div>
+                {overdueHws.map(hw=>(
+                  <StudentHomeworkCard key={hw.id} hw={hw} vocabEntries={vocabEntries} t={t}
+                    isCompleted={false} submission={null}
+                    onStart={()=>{}}/>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── ШАЛГАЛТ ӨГӨХ ── */}
+      {activeExam&&(
+        <div style={{position:"fixed",inset:0,zIndex:5000,background:t.bg}}>
+          <StudentExamScreen
+            exam={activeExam}
+            vocabEntries={vocabEntries}
+            student={s}
+            t={t}
+            onComplete={({score,xpEarned})=>{
+              // Card дээр XP автомат шинэчлэгдэнэ (loadAll-аар refresh болно)
+              setTimeout(()=>{setActiveExam(null);refreshAll&&refreshAll();},3500);
+            }}
+            onToast={(msg,type)=>setExamFinishToast({msg,type:type||"success"})}/>
+        </div>
+      )}
+
+      {/* ── ДААЛГАВАР ХИЙХ (Бэлдэх дасгал) ── */}
+      {activeHw&&(
+        <div style={{position:"fixed",inset:0,zIndex:5000}}>
+          <PracticeStudio
+            vocabs={activeHw.vocabs.filter(v=>v.type!=="grammar")}
+            grammars={activeHw.vocabs.filter(v=>v.type==="grammar")}
+            t={t}
+            level={s.level||0}
+            title={`📝 ${activeHw.hw.title}`}
+            mode="homework"
+            onClose={()=>setActiveHw(null)}
+            onComplete={async({score,correct,total})=>{
+              // Submission илгээх
+              const sub={
+                id:`hsub${Date.now()}`,
+                homework_id:activeHw.hw.id,
+                student_id:s.id,
+                score:Math.round(score),
+                on_time:new Date(activeHw.hw.due_date)>=new Date(),
+              };
+              try{
+                const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json","Prefer":"return=representation"};
+                await fetch(`${SUPA_URL}/rest/v1/homework_submissions`,{method:"POST",headers:h,body:JSON.stringify(sub)});
+                // XP нэмэх
+                const xpAdd=activeHw.hw.xp_reward||30;
+                const newXp=(s.xp||0)+xpAdd;
+                await fetch(`${SUPA_URL}/rest/v1/students?id=eq.${s.id}`,{method:"PATCH",headers:h,body:JSON.stringify({xp:newXp})});
+                _db.students=_db.students.map(x=>x.id===s.id?{...x,xp:newXp}:x);
+                setStudents(p=>p.map(x=>x.id===s.id?{...x,xp:newXp}:x));
+                refreshAll&&refreshAll();
+              }catch(e){console.error("HW submit err",e);}
+            }}/>
+        </div>
+      )}
+
+      {/* ── СОЛОНГОС ХЭЛЭЭ БЭЛДЭХ ── */}
+      {showPractice&&(
+        <div style={{position:"fixed",inset:0,zIndex:5000}}>
+          <PracticeStudio
+            vocabs={vocabEntries.filter(v=>v.type!=="grammar")}
+            grammars={vocabEntries.filter(v=>v.type==="grammar")}
+            t={t}
+            level={s.level||0}
+            title="🌸 Хэлээ бэлдэх"
+            mode="free"
+            onClose={()=>setShowPractice(false)}
+            onComplete={async({score,correct,total})=>{
+              // Free practice — нэмэлт XP (5%)
+              const xpAdd=Math.round((correct||0)*2);
+              if(xpAdd>0){
+                const newXp=(s.xp||0)+xpAdd;
+                try{
+                  const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"};
+                  await fetch(`${SUPA_URL}/rest/v1/students?id=eq.${s.id}`,{method:"PATCH",headers:h,body:JSON.stringify({xp:newXp})});
+                  _db.students=_db.students.map(x=>x.id===s.id?{...x,xp:newXp}:x);
+                  setStudents(p=>p.map(x=>x.id===s.id?{...x,xp:newXp}:x));
+                }catch(e){console.error("XP update err",e);}
+              }
+            }}/>
+        </div>
+      )}
+
+      {/* ── Exam finish toast ── */}
+      <Toast msg={examFinishToast?.msg} type={examFinishToast?.type} onDone={()=>setExamFinishToast(null)}/>
       {tab==="weak"&&(
         <div style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}>
           <div style={{fontWeight:700,fontSize:14,color:t.text,marginBottom:12}}>⚠️ Эргэлзэж буй үгс</div>
@@ -2167,6 +4216,7 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
             onToggleAtt={()=>{}} hideUI={false}
             setShowPay={()=>{}} setEditNotes={()=>{}} editNotes={false}
             notes={s.teacher_notes||""} setNotes={()=>{}}
+            homeworks={homeworks} homeworkSubs={homeworkSubs} exams={exams} examSubs={examSubs}
             weakSearch={weakSearch} setWeakSearch={setWeakSearch} showWeakDD={showWeakDD} setShowWeakDD={setShowWeakDD}/>
         </div>
       )}
@@ -2175,7 +4225,7 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
 }
 
 // ── ADMIN STUDENT DETAIL ──────────────────────────────
-function AdminStudentDetail({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabEntries,badgeDefs,setBadgeDefs,isSuperAdmin}){
+function AdminStudentDetail({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabEntries,badgeDefs,setBadgeDefs,isSuperAdmin,homeworks,homeworkSubs,exams,examSubs}){
   const [showPay,setShowPay]=useState(false);
   const [payForm,setPayForm]=useState({total:"",amount:"",date:"",next_due:"",note:""});
   const [showThemes,setShowThemes]=useState(false);
@@ -2289,6 +4339,7 @@ function AdminStudentDetail({s,setStudents,goBack,attMonth,setAttMonth,classDays
             onToggleAtt={toggleAtt} hideUI={hideUI}
             setShowPay={setShowPay} setEditNotes={setEditNotes} editNotes={editNotes}
             notes={notes} setNotes={setNotes}
+            homeworks={homeworks} homeworkSubs={homeworkSubs} exams={exams} examSubs={examSubs}
             weakSearch={weakSearch} setWeakSearch={setWeakSearch}
             showWeakDD={showWeakDD} setShowWeakDD={setShowWeakDD}/>
         </div>
@@ -2774,7 +4825,7 @@ function AdminPanel({students,setStudents,currentTeacherId,onClose}){
 }
 
 // ── CLASS DETAIL ──────────────────────────────────────
-function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMonth,setAttMonth,badgeDefs,setBadgeDefs}){
+function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,setClasses,goBack,attMonth,setAttMonth,badgeDefs,setBadgeDefs,teacherId,homeworks,homeworkSubs,exams,examSubs,refreshAll}){
   const [selSid,setSelSid]=useState(null);
   const [showAddSt,setShowAddSt]=useState(false);
   const [confirmDel,setConfirmDel]=useState(null);
@@ -2782,27 +4833,45 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
   const [nameVal,setNameVal]=useState(cls.name);
   const [showVocab,setShowVocab]=useState(false);
   const [classDays,setClassDays]=useState(cls.days||[]);
-  const [vocabMonth,setVocabMonth]=useState(attMonth);
   const [vocabDate,setVocabDate]=useState(TODAY);
   const [vocabType,setVocabType]=useState("vocab");
   const [vocabWord,setVocabWord]=useState("");
   const [vocabMean,setVocabMean]=useState("");
+  const [vocabTranslating,setVocabTranslating]=useState(false);
   const [ns,setNs]=useState({name:"",enroll_date:"",level:0,theme_id:"sakura",phone:"",email:"",password:"",rd:""});
   const [tick,setTick]=useState(0);
   const [showPayReport,setShowPayReport]=useState(false);
   const [confirmDelCls,setConfirmDelCls]=useState(false);
   const [showBulkAtt,setShowBulkAtt]=useState(false);
+  const [showCreateHw,setShowCreateHw]=useState(false);
+  const [showHwList,setShowHwList]=useState(false);
+  const [showCreateExam,setShowCreateExam]=useState(false);
+  const [selExam,setSelExam]=useState(null);
   const [toast,setToast]=useState(null);
   const showToast=(msg,type)=>setToast({msg,type:type||"success"});
 
   const vocabEntries=_db.vocab_entries.filter(v=>v.class_id===cls.id);
+  // Class-ийн даалгавар, шалгалт
+  const classHws=(homeworks||[]).filter(h=>h.class_id===cls.id);
+  const classExams=(exams||[]).filter(e=>e.class_id===cls.id);
+  const activeExam=classExams.find(e=>e.status==="active");
 
   if(selSid){
-    const st=students.find(s=>s.id===selSid);
+    // Эхлээд React state-ээс, дараа нь _db-ээс хайна — interval refresh-ийн үед undefined болохгүй
+    const st=students.find(s=>s.id===selSid)||_db.students.find(s=>s.id===selSid);
     if(st)return(
       <AdminStudentDetail s={st} setStudents={setStudents} goBack={()=>setSelSid(null)}
         attMonth={attMonth} setAttMonth={setAttMonth} classDays={classDays}
-        vocabEntries={vocabEntries} badgeDefs={badgeDefs} setBadgeDefs={setBadgeDefs} isSuperAdmin={isSuperAdmin}/>
+        vocabEntries={vocabEntries} badgeDefs={badgeDefs} setBadgeDefs={setBadgeDefs} isSuperAdmin={isSuperAdmin}
+        homeworks={homeworks} homeworkSubs={homeworkSubs} exams={exams} examSubs={examSubs}/>
+    );
+    // Хэрэв олдсонгүй бол loading харуулна, шууд буцахгүй
+    return(
+      <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",background:cls.color+"22"}}>
+        <div className="k-bouncy" style={{fontSize:48,marginBottom:12}}>⏳</div>
+        <div style={{fontSize:14,fontWeight:600,color:"#555",marginBottom:8}}>Сурагчийн мэдээлэл ачаалж байна...</div>
+        <button onClick={()=>setSelSid(null)} className="k-btn k-press" style={bs("#f0f0f0","#555","#e0e0e0",true)}>← Буцах</button>
+      </div>
     );
   }
 
@@ -2849,9 +4918,19 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
               <div style={{display:"flex",gap:6,alignItems:"center"}}>
                 <input value={nameVal} onChange={e=>setNameVal(e.target.value)} autoFocus style={{fontSize:15,fontWeight:700,padding:"4px 10px",borderRadius:8,border:"2px solid #7c3aed",outline:"none",width:180}}/>
                 <button onClick={async()=>{
-                  _db.classes=_db.classes.map(c=>c.id===cls.id?{...c,name:nameVal}:c);
-                  await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"PATCH",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({name:nameVal})});
-                  setEditName(false);
+                  try{
+                    const newName=nameVal.trim();
+                    if(!newName)return;
+                    _db.classes=_db.classes.map(c=>c.id===cls.id?{...c,name:newName}:c);
+                    setClasses&&setClasses(p=>p.map(c=>c.id===cls.id?{...c,name:newName}:c));
+                    await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"PATCH",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({name:newName})});
+                    cls.name=newName;
+                    setEditName(false);
+                    showToast("✅ Нэр шинэчлэгдлээ");
+                  }catch(e){
+                    console.error("Name update err",e);
+                    showToast("❌ Хадгалахад алдаа гарлаа","error");
+                  }
                 }} style={bs("#7c3aed","#fff",undefined,true)}>✓</button>
                 <button onClick={()=>setEditName(false)} style={bs("#fff","#333","#e0e0e0",true)}>✕</button>
               </div>
@@ -2865,7 +4944,14 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
           </div>
           {isAdmin&&(
             <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-              <button onClick={()=>setShowBulkAtt(true)} className="k-btn k-press" style={{...bs("#43a047","#fff",undefined,true),fontWeight:700,boxShadow:"0 3px 0 #2e7d32"}}>✅ Ирц авах</button>
+              <button onClick={()=>setShowBulkAtt(true)} className="k-btn k-press" style={{...bs("#43a047","#fff",undefined,true),fontWeight:700,boxShadow:"0 3px 0 #2e7d32"}}>✅ Ирц</button>
+              <button onClick={()=>setShowCreateHw(true)} className="k-btn k-press" style={{...bs("#7c3aed","#fff",undefined,true),fontWeight:700,boxShadow:"0 3px 0 #5b21b6"}}>📝 Даалгавар</button>
+              <button onClick={()=>setShowHwList(true)} className="k-btn k-press" style={{...bs("#fff","#7c3aed","#d4b8ff",true),position:"relative"}}>📋
+                {classHws.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#e53935",color:"#fff",borderRadius:8,padding:"1px 5px",fontSize:9,fontWeight:800}}>{classHws.length}</span>}
+              </button>
+              <button onClick={()=>activeExam?setSelExam(activeExam):setShowCreateExam(true)} className="k-btn k-press" style={{...bs(activeExam?"#43a047":"#ff9800","#fff",undefined,true),fontWeight:700,boxShadow:activeExam?"0 3px 0 #2e7d32":"0 3px 0 #ef6c00"}}>
+                🏆 {activeExam?"Идэвхтэй":"Шалгалт"}
+              </button>
               <button onClick={()=>setShowVocab(v=>!v)} className="k-btn k-press" style={bs("#fff3cd","#b8860b","#f9a825",true)}>{showVocab?"✕":"📚"}</button>
               <button onClick={printVocabPDF} className="k-btn k-press" style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>🖨️</button>
               {isSuperAdmin&&<button onClick={()=>setShowPayReport(true)} className="k-btn k-press" style={bs("#e8f5e9","#2e7d32","#a5d6a7",true)}>💰</button>}
@@ -2885,6 +4971,73 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
             onToast={showToast}/>
         )}
 
+        {/* Create Homework modal */}
+        {showCreateHw&&(
+          <CreateHomeworkModal
+            cls={cls}
+            vocabEntries={vocabEntries}
+            students={students}
+            teacherId={teacherId}
+            onClose={()=>setShowCreateHw(false)}
+            onCreated={()=>{refreshAll&&refreshAll();}}
+            onToast={showToast}/>
+        )}
+
+        {/* Homework List modal */}
+        {showHwList&&(
+          <HomeworkListModal
+            cls={cls}
+            students={students}
+            vocabEntries={vocabEntries}
+            homeworks={homeworks||[]}
+            submissions={homeworkSubs||[]}
+            isSuperAdmin={isSuperAdmin}
+            currentTeacherId={teacherId}
+            onClose={()=>setShowHwList(false)}
+            onRefresh={()=>refreshAll&&refreshAll()}
+            onToast={showToast}/>
+        )}
+
+        {/* Create Exam modal */}
+        {showCreateExam&&(
+          <CreateExamModal
+            cls={cls}
+            vocabEntries={vocabEntries}
+            teacherId={teacherId}
+            onClose={()=>setShowCreateExam(false)}
+            onCreated={(ex)=>{refreshAll&&refreshAll();setSelExam(ex);}}
+            onToast={showToast}/>
+        )}
+
+        {/* Exam Room modal */}
+        {selExam&&(
+          <ExamRoomModal
+            exam={(exams||[]).find(e=>e.id===selExam.id)||selExam}
+            cls={cls}
+            students={students}
+            vocabEntries={vocabEntries}
+            examSubmissions={examSubs||[]}
+            isOwner={selExam.teacher_id===teacherId||isSuperAdmin}
+            onClose={()=>setSelExam(null)}
+            onRefresh={()=>refreshAll&&refreshAll()}
+            onToast={showToast}/>
+        )}
+
+        {/* Exams list (хэрэв активгүй бөгөөд олон шалгалт байвал) */}
+        {!activeExam&&classExams.length>0&&!selExam&&!showCreateExam&&(
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:6,paddingLeft:4}}>🏆 Шалгалтууд</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {classExams.slice(0,5).map(ex=>(
+                <button key={ex.id} onClick={()=>setSelExam(ex)} className="k-btn k-press"
+                  style={{background:ex.status==="finished"?"#e3f2fd":"#fff3cd",color:ex.status==="finished"?"#1565c0":"#b8860b",border:`1px solid ${ex.status==="finished"?"#90caf9":"#ffe082"}`,borderRadius:9,padding:"5px 10px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                  {ex.status==="finished"?"🏁":"⏳"} {ex.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Toast */}
         <Toast msg={toast?.msg} type={toast?.type} onDone={()=>setToast(null)}/>
 
@@ -2895,7 +5048,14 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
             {[1,2,3,4,5,6,7].map(d=>{
               const active=classDays.includes(d);
               return(
-                <button key={d} onClick={async()=>{const nd=active?classDays.filter(x=>x!==d):[...classDays,d].sort();setClassDays(nd);_db.classes=_db.classes.map(c=>c.id===cls.id?{...c,days:nd}:c);await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"PATCH",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({days:nd})});}}
+                <button key={d} onClick={async()=>{
+                  const nd=active?classDays.filter(x=>x!==d):[...classDays,d].sort();
+                  setClassDays(nd);
+                  _db.classes=_db.classes.map(c=>c.id===cls.id?{...c,days:nd}:c);
+                  setClasses&&setClasses(p=>p.map(c=>c.id===cls.id?{...c,days:nd}:c));
+                  cls.days=nd; // local ref
+                  await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"PATCH",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({days:nd})});
+                }}
                   style={bs(active?cls.color:"#f0f0f0",active?"#fff":"#333",undefined,true)}>{DLABELS[d]}</button>
               );
             })}
@@ -2918,6 +5078,24 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
             </div>
             <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
               <input value={vocabWord} onChange={e=>setVocabWord(e.target.value)} placeholder="한국어" style={{...INP,flex:2,fontSize:14,padding:"8px 10px",fontWeight:600,minWidth:120}} onKeyDown={e=>e.key==="Enter"&&addVocabEntry()}/>
+              <button onClick={async()=>{
+                if(!vocabWord.trim())return;
+                setVocabTranslating(true);
+                try{
+                  const mn=await translateKrToMn(vocabWord.trim());
+                  if(mn)setVocabMean(mn);
+                  else showToast("⚠️ Орчуулга олдсонгүй","warning");
+                }catch(e){
+                  showToast("❌ AI алдаа: "+e.message,"error");
+                }finally{
+                  setVocabTranslating(false);
+                }
+              }} className="k-btn k-press" 
+                disabled={vocabTranslating||!vocabWord.trim()}
+                title="AI-аар орчуулах"
+                style={{...bs("#42a5f5","#fff",undefined,true),padding:"8px 10px",opacity:(vocabTranslating||!vocabWord.trim())?.5:1}}>
+                {vocabTranslating?"⏳":"✨"}
+              </button>
               <input value={vocabMean} onChange={e=>setVocabMean(e.target.value)} placeholder="Монгол утга" style={{...INP,flex:2,fontSize:13,padding:"8px 10px",minWidth:120}} onKeyDown={e=>e.key==="Enter"&&addVocabEntry()}/>
               <button onClick={addVocabEntry} className="k-btn k-press" style={{...bs("#7c3aed","#fff",undefined,true),fontWeight:800,padding:"8px 16px",boxShadow:"0 3px 0 #5b21b6"}}>+ Нэмэх</button>
             </div>
@@ -2954,29 +5132,6 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
                 </div>
               ));
             })()}
-          </div>
-        )}
-        {/* HIDDEN — хуучин vocab list (доорх .filter блокыг засаагүй учир compatibility-д үлдээв) */}
-        {false&&showVocab&&(
-          <div>
-            {[...new Set(vocabEntries.map(v=>v.month))].sort().reverse().map(mo=>(
-              <div key={mo} style={{marginBottom:8,paddingBottom:6,borderBottom:"1px solid #f0f0f0"}}>
-                <div style={{fontSize:11,fontWeight:600,color:"#7c3aed",marginBottom:4}}>📅 {mo}</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                  {vocabEntries.filter(v=>v.month===mo).map(v=>(
-                    <div key={v.id} style={{display:"flex",alignItems:"center",gap:4,background:v.type==="vocab"?"#f3e8ff":"#e8f5e9",border:`1px solid ${v.type==="vocab"?"#a78bfa":"#66bb6a"}`,borderRadius:8,padding:"3px 8px",fontSize:11}}>
-                      <span style={{fontWeight:600}}>{v.word}</span>
-                      {v.meaning&&<span style={{opacity:.6,fontSize:10}}>{v.meaning}</span>}
-                      <span onClick={async()=>{
-                        _db.vocab_entries=_db.vocab_entries.filter(x=>x.id!==v.id);
-                        await fetch(`${SUPA_URL}/rest/v1/vocab_entries?id=eq.${v.id}`,{method:"DELETE",headers:{"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`}});
-                        setTick(t=>t+1);
-                      }} style={{cursor:"pointer",opacity:.4,fontSize:9}}>✕</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
           </div>
         )}
 
@@ -3096,11 +5251,35 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
               <div style={{display:"flex",gap:8}}>
                 <button onClick={()=>setConfirmDelCls(false)} style={{...bs("#fff","#333","#e0e0e0"),flex:1,justifyContent:"center"}}>Болих</button>
                 <button onClick={async()=>{
-                  const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
-                  await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"DELETE",headers:h});
-                  _db.classes=_db.classes.filter(c=>c.id!==cls.id);
-                  setConfirmDelCls(false);
-                  goBack();
+                  try{
+                    const h={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
+                    // 1. Ангид харьяалагдах бүх сурагчийг устгах
+                    const classSts=_db.students.filter(s=>s.class_id===cls.id);
+                    for(const st of classSts){
+                      await fetch(`${SUPA_URL}/rest/v1/students?id=eq.${st.id}`,{method:"DELETE",headers:h});
+                    }
+                    // 2. vocab_entries устгах
+                    await fetch(`${SUPA_URL}/rest/v1/vocab_entries?class_id=eq.${cls.id}`,{method:"DELETE",headers:h});
+                    // 3. Анги устгах
+                    const r=await fetch(`${SUPA_URL}/rest/v1/classes?id=eq.${cls.id}`,{method:"DELETE",headers:h});
+                    if(!r.ok){
+                      const errTxt=await r.text();
+                      showToast(`❌ Устгахад алдаа: ${errTxt.slice(0,80)}`,"error");
+                      return;
+                    }
+                    // 4. Local state шинэчилэх — энэ нь өмнө дутуу байсан!
+                    _db.classes=_db.classes.filter(c=>c.id!==cls.id);
+                    _db.students=_db.students.filter(s=>s.class_id!==cls.id);
+                    _db.vocab_entries=_db.vocab_entries.filter(v=>v.class_id!==cls.id);
+                    setClasses&&setClasses(p=>p.filter(c=>c.id!==cls.id));
+                    setStudents(p=>p.filter(s=>s.class_id!==cls.id));
+                    setConfirmDelCls(false);
+                    showToast("✅ Анги устгагдлаа");
+                    setTimeout(()=>goBack(),300);
+                  }catch(e){
+                    console.error("Delete class err",e);
+                    showToast("❌ Алдаа гарлаа: "+e.message,"error");
+                  }
                 }} style={{...bs("#e53935","#fff"),flex:1,justifyContent:"center",fontWeight:700}}>Устгах</button>
               </div>
             </div>
@@ -3112,38 +5291,97 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,goBack,attMo
 }
 
 // ── MAIN APP ──────────────────────────────────────────
+
+// ── Session helpers (localStorage) ────────────────────
+const SESSION_KEY="kandun_user_session_v1";
+const loadSession=()=>{
+  try{
+    if(typeof localStorage==="undefined")return null;
+    const raw=localStorage.getItem(SESSION_KEY);
+    if(!raw)return null;
+    const data=JSON.parse(raw);
+    // 90 хоногийн хүчинтэй
+    if(data.savedAt&&(Date.now()-data.savedAt)>90*24*60*60*1000){
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return data.user;
+  }catch(e){return null;}
+};
+const saveSession=(user)=>{
+  try{
+    if(typeof localStorage==="undefined")return;
+    if(user){
+      localStorage.setItem(SESSION_KEY,JSON.stringify({user,savedAt:Date.now()}));
+    }else{
+      localStorage.removeItem(SESSION_KEY);
+    }
+  }catch(e){console.warn("Session save err",e);}
+};
+
 export default function App(){
-  const [user,setUser]=useState(null);
+  const [user,setUserState]=useState(()=>loadSession()); // localStorage-аас ачаална
+  // setUser-ийн орон setUserState-ыг ороогоор localStorage-д ч давхар хадгална
+  const setUser=useCallback((newUser)=>{
+    setUserState(newUser);
+    saveSession(newUser);
+  },[]);
   const [classes,setClasses]=useState([]);
   const [students,setStudents]=useState([]);
   const [badgeDefs,setBadgeDefs]=useState([]);
+  const [homeworks,setHomeworks]=useState([]);
+  const [homeworkSubs,setHomeworkSubs]=useState([]);
+  const [exams,setExams]=useState([]);
+  const [examSubs,setExamSubs]=useState([]);
   const [selCls,setSelCls]=useState(null);
   const [showAdd,setShowAdd]=useState(false);
   const [showAccounts,setShowAccounts]=useState(false);
   const [attMonth,setAttMonth]=useState(new Date().toISOString().slice(0,7));
   const [nc,setNc]=useState({name:"",time:"",days:[],color:"#e91e8c"});
-  const [loading,setLoading]=useState(false);
+  const [loading,setLoading]=useState(()=>!!loadSession()); // session байвал loading=true (data ачаалах хэрэгтэй)
   const [loadErr,setLoadErr]=useState(null);
+  // Pull-to-refresh state
+  const [pullY,setPullY]=useState(0);
+  const [refreshing,setRefreshing]=useState(false);
+  const pullStartRef=useRef(0);
+  const pullingRef=useRef(false);
 
-  const loadAll=useCallback(async()=>{
-    // 10 секундын дараа timeout
-    const timeout=setTimeout(()=>{
-      setLoading(false);
-      setLoadErr("Холболт удаж байна. Дахин оролдоно уу.");
-    },10000);
+  const loadAll=useCallback(async(isInitial=true)=>{
+    // Зөвхөн анхны ачаалалд UI-н алдаа харуулна.
+    let uiTimeout=null;
+    if(isInitial){
+      uiTimeout=setTimeout(()=>{
+        setLoading(false);
+        setLoadErr("Холболт удаж байна. Дахин оролдоно уу.");
+      },20000);
+    }
+    // Network-д timeout — 25 секунд хүрвэл цуцална
+    const ctrl=new AbortController();
+    const netTimeout=setTimeout(()=>ctrl.abort(),25000);
     try{
       const headers={"apikey":SUPA_KEY,"Authorization":`Bearer ${SUPA_KEY}`};
-      const [r1,r2,r3,r4,r5,r6,r7]=await Promise.all([
-        fetch(`${SUPA_URL}/rest/v1/classes?select=*`,{headers}),
-        fetch(`${SUPA_URL}/rest/v1/students?select=*`,{headers}),
-        fetch(`${SUPA_URL}/rest/v1/badge_defs?select=*`,{headers}),
-        fetch(`${SUPA_URL}/rest/v1/vocab_entries?select=*`,{headers}),
-        fetch(`${SUPA_URL}/rest/v1/payments?select=*`,{headers}),
-        fetch(`${SUPA_URL}/rest/v1/pending_students?select=*`,{headers}),
-        fetch(`${SUPA_URL}/rest/v1/teachers?select=*`,{headers}),
+      const opts={headers,signal:ctrl.signal};
+      const [r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11]=await Promise.all([
+        fetch(`${SUPA_URL}/rest/v1/classes?select=*`,opts),
+        fetch(`${SUPA_URL}/rest/v1/students?select=*`,opts),
+        fetch(`${SUPA_URL}/rest/v1/badge_defs?select=*`,opts),
+        fetch(`${SUPA_URL}/rest/v1/vocab_entries?select=*`,opts),
+        fetch(`${SUPA_URL}/rest/v1/payments?select=*`,opts),
+        fetch(`${SUPA_URL}/rest/v1/pending_students?select=*`,opts),
+        fetch(`${SUPA_URL}/rest/v1/teachers?select=*`,opts),
+        // Шинэ хүснэгтүүд (хэрэв миграйшн ажиллаагүй бол catch-аар алгасна)
+        fetch(`${SUPA_URL}/rest/v1/homeworks?select=*`,opts).catch(()=>({ok:false})),
+        fetch(`${SUPA_URL}/rest/v1/homework_submissions?select=*`,opts).catch(()=>({ok:false})),
+        fetch(`${SUPA_URL}/rest/v1/exams?select=*`,opts).catch(()=>({ok:false})),
+        fetch(`${SUPA_URL}/rest/v1/exam_submissions?select=*`,opts).catch(()=>({ok:false})),
       ]);
-      const [cls,sts,bds,voc,pays,pends,tchs]=await Promise.all([r1.json(),r2.json(),r3.json(),r4.json(),r5.json(),r6.json(),r7.json()]);
-      clearTimeout(timeout);
+      clearTimeout(netTimeout);
+      const parseJsonSafe=async(r)=>{try{if(!r||!r.ok)return[];return await r.json();}catch(e){return[];}};
+      const [cls,sts,bds,voc,pays,pends,tchs,hws,hsubs,exs,esubs]=await Promise.all([
+        r1.json(),r2.json(),r3.json(),r4.json(),r5.json(),r6.json(),r7.json(),
+        parseJsonSafe(r8),parseJsonSafe(r9),parseJsonSafe(r10),parseJsonSafe(r11),
+      ]);
+      if(uiTimeout)clearTimeout(uiTimeout);
       _db.classes=Array.isArray(cls)?cls:[];
       _db.students=Array.isArray(sts)?sts.map(s=>({
         ...s,
@@ -3160,25 +5398,101 @@ export default function App(){
       setClasses([..._db.classes]);
       setStudents([..._db.students]);
       setBadgeDefs([..._db.badge_defs]);
-      setLoadErr(null);
-      setLoading(false);
+      setHomeworks(Array.isArray(hws)?hws:[]);
+      setHomeworkSubs(Array.isArray(hsubs)?hsubs:[]);
+      setExams(Array.isArray(exs)?exs:[]);
+      setExamSubs(Array.isArray(esubs)?esubs:[]);
+      if(isInitial){
+        setLoadErr(null);
+        setLoading(false);
+      }
     }catch(e){
-      clearTimeout(timeout);
-      console.error("Load error:",e);
-      setLoadErr("Интернет холболт шалгана уу.");
-      setLoading(false);
+      if(uiTimeout)clearTimeout(uiTimeout);
+      clearTimeout(netTimeout);
+      // Background refresh fail хийвэл ЧИМЭЭГҮЙ. Зөвхөн console-д log.
+      if(isInitial){
+        console.error("Initial load error:",e);
+        setLoadErr("Холболтын алдаа. Хуудсыг refresh хийгээд үзнэ үү.");
+        setLoading(false);
+      }else{
+        console.warn("Background refresh failed (silent):",e.message);
+      }
     }
   },[]);
 
   useEffect(()=>{
     if(user&&user.role==="teacher"){
-      loadAll();
+      loadAll(true); // анхны ачаалал
       const interval=setInterval(()=>{
-        if(document.visibilityState==="visible") loadAll();
-      },30000);
+        if(document.visibilityState==="visible") loadAll(false); // background refresh - чимээгүй
+      },60000); // 30 → 60 секунд (нэг минут тутамд хангалттай)
+      return()=>clearInterval(interval);
+    }
+    if(user&&user.role==="student"){
+      // Сурагчид ч ачаалах
+      loadAll(true);
+      const interval=setInterval(()=>{
+        if(document.visibilityState==="visible") loadAll(false);
+      },60000);
       return()=>clearInterval(interval);
     }
   },[user,loadAll]);
+
+  // ── PULL-TO-REFRESH (Дэлгэцийг доош чирэхэд автомат refresh) ──
+  useEffect(()=>{
+    if(!user)return; // Зөвхөн нэвтэрсэн үед ажиллана
+    const THRESHOLD=70; // px — хэр их доош чирэхэд refresh хийх
+    const MAX_PULL=120; // px — хязгаар
+
+    const onTouchStart=(e)=>{
+      // Зөвхөн scroll нь дээд талд байгаа үед эхэлнэ
+      if(window.scrollY>0){
+        pullingRef.current=false;
+        return;
+      }
+      pullStartRef.current=e.touches[0].clientY;
+      pullingRef.current=true;
+    };
+    const onTouchMove=(e)=>{
+      if(!pullingRef.current||refreshing)return;
+      const currentY=e.touches[0].clientY;
+      const delta=currentY-pullStartRef.current;
+      if(delta>0&&window.scrollY===0){
+        // Доош чирж байна — pull animation харуулна
+        const dampened=Math.min(delta*0.5,MAX_PULL); // damping factor
+        setPullY(dampened);
+        // Page scroll-ийг түр зогсоо
+        if(delta>10)e.preventDefault();
+      }
+    };
+    const onTouchEnd=async()=>{
+      if(!pullingRef.current)return;
+      pullingRef.current=false;
+      if(pullY>=THRESHOLD&&!refreshing){
+        // Refresh trigger
+        setRefreshing(true);
+        setPullY(THRESHOLD);
+        await loadAll(false); // background refresh — алдааны popup гарахгүй
+        // Tactile feedback (хэрэв device дэмждэг бол)
+        try{if(navigator.vibrate)navigator.vibrate(50);}catch(e){}
+        setTimeout(()=>{
+          setRefreshing(false);
+          setPullY(0);
+        },400);
+      }else{
+        setPullY(0);
+      }
+    };
+
+    document.addEventListener("touchstart",onTouchStart,{passive:true});
+    document.addEventListener("touchmove",onTouchMove,{passive:false});
+    document.addEventListener("touchend",onTouchEnd);
+    return()=>{
+      document.removeEventListener("touchstart",onTouchStart);
+      document.removeEventListener("touchmove",onTouchMove);
+      document.removeEventListener("touchend",onTouchEnd);
+    };
+  },[user,refreshing,pullY,loadAll]);
 
   const isTeacher=user?.role==="teacher";
   const isSuperAdmin=!!(user?.isSuperAdmin);
@@ -3222,6 +5536,44 @@ export default function App(){
 
   if(!user)return <AuthScreen onAuth={setUser}/>;
 
+  // ── Pull-to-refresh indicator (заавал нэвтэрсэн үед харагдана) ──
+  const PullIndicator=()=>{
+    if(pullY===0&&!refreshing)return null;
+    const progress=Math.min(pullY/70,1); // 0..1
+    return(
+      <div style={{
+        position:"fixed",top:0,left:0,right:0,
+        display:"flex",alignItems:"center",justifyContent:"center",
+        height:Math.max(pullY,refreshing?70:0),
+        background:`linear-gradient(180deg,rgba(124,58,237,${0.05+progress*0.1}) 0%,transparent 100%)`,
+        zIndex:200,pointerEvents:"none",
+        transition:refreshing?"height .3s ease":"none",
+      }}>
+        <div style={{
+          background:"#fff",
+          borderRadius:"50%",
+          width:44,height:44,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          boxShadow:"0 4px 14px rgba(124,58,237,0.25)",
+          transform:refreshing?"none":`rotate(${progress*360}deg) scale(${0.6+progress*0.4})`,
+          transition:"transform .1s ease",
+        }}>
+          {refreshing?(
+            <div style={{
+              width:22,height:22,
+              border:"3px solid #e9e3ff",
+              borderTopColor:"#7c3aed",
+              borderRadius:"50%",
+              animation:"kSpinSlow 0.6s linear infinite",
+            }}/>
+          ):(
+            <span style={{fontSize:22,opacity:progress}}>{progress>=1?"🔄":"⬇️"}</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   if(user.role==="student"){
     const s=students.find(x=>x.id===user.id)||_db.students.find(x=>x.id===user.id);
     if(!s){
@@ -3247,9 +5599,14 @@ export default function App(){
     const ve=_db.vocab_entries.filter(v=>v.class_id===s.class_id);
     const classmates=students.filter(x=>x.class_id===s.class_id);
     return(
-      <StudentView s={s} setStudents={setStudents} goBack={()=>setUser(null)}
-        attMonth={attMonth} setAttMonth={setAttMonth} classDays={cls?.days||[]}
-        vocabEntries={ve} classmates={classmates} classColor={cls?.color||"#7c3aed"}/>
+      <>
+        <PullIndicator/>
+        <StudentView s={s} setStudents={setStudents} goBack={()=>setUser(null)}
+          attMonth={attMonth} setAttMonth={setAttMonth} classDays={cls?.days||[]}
+          vocabEntries={ve} classmates={classmates} classColor={cls?.color||"#7c3aed"}
+          homeworks={homeworks} homeworkSubs={homeworkSubs}
+          exams={exams} examSubs={examSubs} refreshAll={()=>loadAll(false)}/>
+      </>
     );
   }
 
@@ -3258,14 +5615,21 @@ export default function App(){
     if(!cls)return null;
     const clsSts=students.filter(s=>s.class_id===selCls);
     return(
-      <ClassDetail cls={cls} isAdmin={isTeacher} isSuperAdmin={isSuperAdmin} students={clsSts} setStudents={setStudents}
-        goBack={()=>setSelCls(null)} attMonth={attMonth} setAttMonth={setAttMonth}
-        badgeDefs={badgeDefs} setBadgeDefs={setBadgeDefs}/>
+      <>
+        <PullIndicator/>
+        <ClassDetail cls={cls} isAdmin={isTeacher} isSuperAdmin={isSuperAdmin} students={clsSts} setStudents={setStudents} setClasses={setClasses}
+          goBack={()=>setSelCls(null)} attMonth={attMonth} setAttMonth={setAttMonth}
+          badgeDefs={badgeDefs} setBadgeDefs={setBadgeDefs}
+          teacherId={user.id} homeworks={homeworks} homeworkSubs={homeworkSubs}
+          exams={exams} examSubs={examSubs} refreshAll={()=>loadAll(false)}/>
+      </>
     );
   }
 
   return(
-    <div style={{minHeight:"100vh",background:"linear-gradient(180deg,#f8f9ff 0%,#fff 200px)",fontFamily:"system-ui",padding:16,overflowX:"hidden",boxSizing:"border-box"}}>
+    <>
+      <PullIndicator/>
+      <div style={{minHeight:"100vh",background:"linear-gradient(180deg,#f8f9ff 0%,#fff 200px)",fontFamily:"system-ui",padding:16,overflowX:"hidden",boxSizing:"border-box"}}>
       <div style={{maxWidth:840,margin:"0 auto"}}>
         {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:8}}>
@@ -3285,8 +5649,12 @@ export default function App(){
               </button>
             )}
             {isSuperAdmin&&<button onClick={()=>setShowAdd(true)} className="k-btn k-press" style={bs("#7c3aed","#fff",undefined,true)}>+ Анги</button>}
-            <button onClick={()=>loadAll()} className="k-btn k-press" style={bs("#f0f0f0","#555","#e0e0e0",true)}>🔄</button>
-            <button onClick={()=>setUser(null)} className="k-btn k-press" style={bs("#fff","#e53935","#ffcdd2",true)}>Гарах</button>
+            <button onClick={()=>loadAll(false)} className="k-btn k-press" style={bs("#f0f0f0","#555","#e0e0e0",true)} title="Сэргээх">🔄</button>
+            <button onClick={()=>{
+              if(window.confirm("Системээс гарах уу? Дахин нэвтрэхэд и-мэйл, нууц үгээ оруулах хэрэгтэй.")){
+                setUser(null);
+              }
+            }} className="k-btn k-press" style={bs("#fff","#e53935","#ffcdd2",true)}>Гарах</button>
           </div>
         </div>
 
@@ -3298,11 +5666,34 @@ export default function App(){
           const allStudents=isSuperAdmin?students:students.filter(s=>visibleClasses.some(c=>c.id===s.class_id));
           const overdue=isSuperAdmin?allStudents.filter(s=>s.next_due&&s.next_due<TODAY&&(s.total_paid||0)<(s.total_fee||0)):[];
           const totalDue=overdue.reduce((sum,s)=>sum+((s.total_fee||0)-(s.total_paid||0)),0);
+          // Активний шалгалтуудыг харагдуулна (бусад багшийн ч)
+          const visibleClassIds=visibleClasses.map(c=>c.id);
+          const activeExams=(exams||[]).filter(e=>e.status==="active"&&visibleClassIds.includes(e.class_id));
+          // Хүлээгдэж буй даалгавруудын тоо
+          const allClassHws=(homeworks||[]).filter(h=>visibleClassIds.includes(h.class_id));
+          const pendingHws=allClassHws.filter(h=>new Date(h.due_date)>new Date()).length;
           return(
             <div className="k-fade" style={{background:"#fff",borderRadius:18,padding:16,marginBottom:16,border:"1px solid #f0f0f0",boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
               <div style={{fontWeight:800,fontSize:14,color:"#1a1a2e",marginBottom:10,display:"flex",alignItems:"center",gap:6}}>
                 📊 Өнөөдрийн тойм <span style={{fontSize:11,color:"#888",fontWeight:500}}>· {fmtDate(TODAY)}</span>
               </div>
+
+              {/* Идэвхтэй шалгалт alert */}
+              {activeExams.length>0&&(
+                <div className="k-pop" style={{background:`linear-gradient(135deg,#ff5722,#e64a19)`,color:"#fff",borderRadius:14,padding:"10px 14px",marginBottom:10,display:"flex",alignItems:"center",gap:10,cursor:"pointer",boxShadow:"0 4px 14px rgba(229,57,53,0.3)",animation:"kPulse 2.5s ease-in-out infinite"}}
+                  onClick={()=>{
+                    const ex=activeExams[0];
+                    setSelCls(ex.class_id);
+                  }}>
+                  <div className="k-bouncy" style={{fontSize:24}}>🏆</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:800,fontSize:13}}>{activeExams.length} ИДЭВХТЭЙ ШАЛГАЛТ</div>
+                    <div style={{fontSize:11,opacity:.95}}>{activeExams.map(e=>e.title).slice(0,2).join(", ")}</div>
+                  </div>
+                  <div style={{fontSize:13,fontWeight:800}}>→</div>
+                </div>
+              )}
+
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:8}}>
                 {/* Өнөөдрийн анги */}
                 <div style={{background:"#f5f0ff",borderRadius:12,padding:"10px 12px",borderLeft:"3px solid #7c3aed"}}>
@@ -3318,6 +5709,14 @@ export default function App(){
                   <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e"}}>{allStudents.length}</div>
                   <div style={{fontSize:10,color:"#666",marginTop:1}}>{visibleClasses.length} ангид</div>
                 </div>
+                {/* Даалгавар */}
+                {allClassHws.length>0&&(
+                  <div style={{background:"#fff3cd",borderRadius:12,padding:"10px 12px",borderLeft:"3px solid #b8860b"}}>
+                    <div style={{fontSize:10,color:"#b8860b",fontWeight:700,marginBottom:2}}>📝 ДААЛГАВАР</div>
+                    <div style={{fontSize:18,fontWeight:800,color:"#1a1a2e"}}>{allClassHws.length}</div>
+                    <div style={{fontSize:10,color:"#b8860b",marginTop:1}}>{pendingHws} идэвхтэй</div>
+                  </div>
+                )}
                 {/* Төлбөр (зөвхөн superadmin) */}
                 {isSuperAdmin&&(
                   <div style={{background:overdue.length>0?"#fce4ec":"#e8f5e9",borderRadius:12,padding:"10px 12px",borderLeft:`3px solid ${overdue.length>0?"#c62828":"#2e7d32"}`}}>
@@ -3436,5 +5835,6 @@ export default function App(){
         )}
       </div>
     </div>
+    </>
   );
 }
