@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 
 // ── SUPABASE ────────────────────────────────────────────────────────
 const SUPA_URL = "https://ftmvhmsvrtownqrnvbzo.supabase.co";
-const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0bXZobXN2cnRvd25xcm52YnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI2OTQ4OTMsImV4cCI6MjA3ODI3MDg5M30.qpcW4d4i_Z3DxYwxhwYRMz9LBfMrFgaDFLF4l5tt6Vk";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0bXZobXN2cnRvd25xcm52YnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMjE5ODIsImV4cCI6MjA5NDU5Nzk4Mn0.TV0YMNDNRcjv8oVfekwjJYeMgHlix4c4J3l0CR2_HUI";
 
 const supaHeaders = () => ({
   "apikey": SUPA_KEY,
