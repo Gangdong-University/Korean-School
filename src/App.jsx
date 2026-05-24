@@ -51,29 +51,40 @@ const speakKr=(text)=>{
 // ── GEMINI AI HELPERS ─────────────────────────────────
 // Vercel api/gemini.js endpoint-той ажиллана
 // Environment-аас GEMINI_API_KEY уншина (Vercel-д тохируулна)
-const GEMINI_ENDPOINT = "/api/gemini";
+// Gemini API key — Vercel environment variable-аас уншихын оронд
+// шууд Google-ийн endpoint руу хандана (API key нь App.jsx-д байна)
+// ⚠️ Та GEMINI_API_KEY-ийг доор тавина уу:
+const GEMINI_API_KEY = ""; // ← ЭНЭ МӨРТ ӨӨРИЙН API KEY-Г ТАВЬ! Жишээ: "AIzaSyB..."
+const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_DIRECT_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 async function geminiCall(prompt, opts = {}) {
-  try {
-    const r = await fetch(GEMINI_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt,
-        system: opts.system,
-        json: opts.json || false,
-      }),
-    });
-    if (!r.ok) {
-      const errData = await r.json().catch(() => ({}));
-      throw new Error(errData.error || `Gemini error: ${r.status}`);
-    }
-    const data = await r.json();
-    return data.text || "";
-  } catch (e) {
-    console.error("Gemini call error:", e);
-    throw e;
+  if (!GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY тавигдаагүй байна — App.jsx дотор GEMINI_API_KEY-г оруулна уу");
   }
+  const reqBody = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.7,
+      topP: 0.95,
+      maxOutputTokens: 4096,
+      ...(opts.json ? { responseMimeType: "application/json" } : {}),
+    },
+  };
+  if (opts.system) {
+    reqBody.systemInstruction = { parts: [{ text: opts.system }] };
+  }
+  const r = await fetch(`${GEMINI_DIRECT_URL}?key=${GEMINI_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(reqBody),
+  });
+  if (!r.ok) {
+    const errText = await r.text().catch(() => "");
+    throw new Error(`Gemini API алдаа (${r.status}): ${errText.slice(0, 200)}`);
+  }
+  const data = await r.json();
+  return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 // Солонгос үг → Монгол утга орчуулга
@@ -87,15 +98,12 @@ async function translateKrToMn(koreanWord) {
 - "학교" → "сургууль"
 
 Одоо: "${word}" →`;
-  try {
-    const text = await geminiCall(prompt, {
-      system: "Та солонгос-монгол хэлний орчуулагч. Зөвхөн утгыг буцаана, тайлбар бичихгүй.",
-    });
-    // Ихэвчлэн утга л буцаагдана
-    return text.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 100);
-  } catch (e) {
-    return "";
-  }
+  // Алдаа throw хийгээд caller-руу дамжуулна
+  const text = await geminiCall(prompt, {
+    system: "Та солонгос-монгол хэлний орчуулагч. Зөвхөн утгыг буцаана, тайлбар бичихгүй.",
+  });
+  // Ихэвчлэн утга л буцаагдана
+  return text.replace(/^["'\s]+|["'\s]+$/g, "").split("\n")[0].slice(0, 100);
 }
 
 // Шалгалт/Бэлдэх дасгалын асуулт үүсгэх
@@ -707,6 +715,7 @@ function StatCards({streak,grammarLearned,grammarTotal,learnedVocab,totalVocab,p
 function AttendanceStats({present,total,allPresent,card}){
   const pct=total>0?Math.round(present/total*100):0;
   const color=pct>=80?"#2e7d32":pct>=60?"#e65100":"#c62828";
+  const missed=Math.max(0,total-present);
   return(
     <div style={{marginTop:6,display:"flex",gap:6}}>
       <div style={{flex:1,background:card,borderRadius:8,padding:"5px 8px",textAlign:"center"}}>
@@ -714,12 +723,12 @@ function AttendanceStats({present,total,allPresent,card}){
         <div style={{fontSize:9,color:"#888"}}>Энэ сарын ирц</div>
       </div>
       <div style={{flex:1,background:card,borderRadius:8,padding:"5px 8px",textAlign:"center"}}>
-        <div style={{fontSize:14,fontWeight:800,color:"#555"}}>{allPresent}</div>
-        <div style={{fontSize:9,color:"#888"}}>Нийт ирсэн</div>
+        <div style={{fontSize:14,fontWeight:800,color:"#2e7d32"}}>{present}</div>
+        <div style={{fontSize:9,color:"#888"}}>{present===1?"оролт":"оролт"}</div>
       </div>
       <div style={{flex:1,background:card,borderRadius:8,padding:"5px 8px",textAlign:"center"}}>
-        <div style={{fontSize:14,fontWeight:800,color:total-present>0?"#e65100":"#2e7d32"}}>{total-present}</div>
-        <div style={{fontSize:9,color:"#888"}}>Ирцгүй</div>
+        <div style={{fontSize:14,fontWeight:800,color:missed>0?"#e65100":"#2e7d32"}}>{total}</div>
+        <div style={{fontSize:9,color:"#888"}}>сарын нийт</div>
       </div>
     </div>
   );
@@ -3703,7 +3712,7 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
             );
           })}
         </div>
-        <div style={{marginTop:5,fontSize:10,color:t.text,opacity:.5,textAlign:"right"}}>{present}/{sessions.length} ирсэн</div>
+        <div style={{marginTop:5,fontSize:10,color:t.text,opacity:.5,textAlign:"right"}}>{sessions.length} оролтоос {present}-нд оролцсон</div>
         {sessions.length>0&&<AttendanceStats present={present} total={sessions.length} allPresent={allPresent} card={t.card}/>}
       </div>
 
@@ -3874,7 +3883,7 @@ function CardContent({s,t,isAdmin,isSuperAdmin,upd,attMonth,setAttMonth,classDay
 
 // ── STUDENT VIEW ──────────────────────────────────────
 function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabEntries,classmates,classColor,homeworks,homeworkSubs,exams,examSubs,refreshAll}){
-  const [tab,setTab]=useState("card");
+  const [tab,setTab]=useState("home");
   const [attM,setAttM]=useState(attMonth);
   const [showChangePw,setShowChangePw]=useState(false);
   const [showThemes,setShowThemes]=useState(false);
@@ -4000,41 +4009,245 @@ function StudentView({s,setStudents,goBack,attMonth,setAttMonth,classDays,vocabE
         );
       })()}
 
-      {/* ── СОЛОНГОС ХЭЛЭЭ БЭЛДЭХ ТОВЧ ── */}
-      <div style={{display:"flex",gap:8,marginBottom:14}}>
-        <button onClick={()=>setShowPractice(true)} className="k-btn k-press"
-          style={{
-            flex:1,background:`linear-gradient(135deg,${t.accent},${t.accent}cc)`,
-            color:"#fff",border:"none",borderRadius:14,padding:"12px",
-            fontWeight:800,fontSize:13,cursor:"pointer",
-            boxShadow:`0 4px 0 ${t.border}`,
-            display:"flex",alignItems:"center",justifyContent:"center",gap:6,
-          }}>
-          🎓 Солонгос хэлээ бэлдэх
-        </button>
-      </div>
+      {/* ── НҮҮР ДЭЛГЭЦИЙН HABIT TRACKER МАЯГИЙН МЕНЮ ── */}
+      {tab==="home"&&(() => {
+        const myHws=(homeworks||[]).filter(h=>h.class_id===s.class_id);
+        const mySubs=(homeworkSubs||[]).filter(hs=>hs.student_id===s.id);
+        const submittedIds=new Set(mySubs.map(x=>x.homework_id));
+        const pendingHwCount=myHws.filter(h=>!submittedIds.has(h.id)&&new Date(h.due_date)>new Date()).length;
+        const myExams=(exams||[]).filter(e=>e.class_id===s.class_id);
+        const mySubsIds=new Set((examSubs||[]).filter(es=>es.student_id===s.id).map(es=>es.exam_id));
+        const activeExamCount=myExams.filter(e=>e.status==="active"&&!mySubsIds.has(e.id)).length;
+        const totalVocabCount=vocabEntries.length;
+        // Тухайн өдрийн progress (хичээллэх ёстой/хийсэн)
+        const sess=getSessions(classDays,attM);
+        const presentCount=sess.filter(item=>(s.attendance||{})[item.date]).length;
+        const todayName=new Date().toLocaleDateString("mn-MN",{weekday:"long"});
 
-      <div style={{display:"flex",gap:5,marginBottom:14,background:t.soft,borderRadius:12,padding:4,overflowX:"auto"}}>
-        {[["card","📋"],["daily","📅"],["homework","📝"],["vocab","📚"],["weak","⚠️"],["leaderboard","🏆"]].map(item=>{
-          // Даалгавар tab дээр badge — хийгээгүй даалгаврын тоо
-          const pendingHwCount=item[0]==="homework"?(() => {
-            const myHws=(homeworks||[]).filter(h=>h.class_id===s.class_id);
-            const submittedIds=new Set((homeworkSubs||[]).filter(hs=>hs.student_id===s.id).map(hs=>hs.homework_id));
-            return myHws.filter(h=>!submittedIds.has(h.id)&&new Date(h.due_date)>new Date()).length;
-          })():0;
-          return(
-            <button key={item[0]} onClick={()=>setTab(item[0])} className="k-press"
-              style={{flex:1,minWidth:44,padding:"9px 2px",borderRadius:9,border:"none",position:"relative",
-                background:tab===item[0]?t.card:"transparent",
-                color:tab===item[0]?t.accent:t.text,
-                fontWeight:tab===item[0]?700:500,
-                fontSize:16,cursor:"pointer",transition:"all .15s",
-                boxShadow:tab===item[0]?`0 2px 8px ${t.accent}33`:"none"}}>{item[1]}
-              {pendingHwCount>0&&<span style={{position:"absolute",top:1,right:3,background:"#e53935",color:"#fff",borderRadius:8,padding:"0 4px",fontSize:9,fontWeight:800,minWidth:14,textAlign:"center"}}>{pendingHwCount}</span>}
-            </button>
-          );
-        })}
-      </div>
+        const menuItems=[
+          {
+            id:"practice",
+            emoji:"🎓",
+            title:"Солонгос хэлээ бэлдэх",
+            sub:`${totalVocabCount} үг, дүрэм бэлэн`,
+            color:"#42a5f5",
+            bg:"#e3f2fd",
+            badge:null,
+            action:()=>setShowPractice(true),
+          },
+          {
+            id:"homework",
+            emoji:"📝",
+            title:"Гэрийн даалгавар",
+            sub:pendingHwCount>0?`${pendingHwCount} хийх ёстой`:`${myHws.length} нийт`,
+            color:"#ab47bc",
+            bg:"#f3e5f5",
+            badge:pendingHwCount>0?pendingHwCount:null,
+            action:()=>setTab("homework"),
+          },
+          {
+            id:"exam",
+            emoji:"🏆",
+            title:"Шалгалт",
+            sub:activeExamCount>0?`${activeExamCount} идэвхтэй!`:`${myExams.length} нийт`,
+            color:"#ff7043",
+            bg:"#fbe9e7",
+            badge:activeExamCount>0?"!":null,
+            action:()=>{
+              if(activeExamCount>0){
+                const e=myExams.find(e=>e.status==="active"&&!mySubsIds.has(e.id));
+                if(e)setActiveExam(e);
+              }else{
+                setExamFinishToast({msg:"Одоогоор идэвхтэй шалгалт байхгүй",type:"info"});
+              }
+            },
+          },
+          {
+            id:"card",
+            emoji:"📋",
+            title:"Сурагчийн карт",
+            sub:`⚡${s.xp||0} XP · 🔥${s.hw_streak||0} streak`,
+            color:"#66bb6a",
+            bg:"#e8f5e9",
+            badge:null,
+            action:()=>setTab("card"),
+          },
+          {
+            id:"daily",
+            emoji:"📅",
+            title:"Календарь",
+            sub:"Өдрийн үг, дүрэм харах",
+            color:"#ec407a",
+            bg:"#fce4ec",
+            badge:null,
+            action:()=>setTab("daily"),
+          },
+          {
+            id:"vocab",
+            emoji:"📚",
+            title:"Үгсийн сан",
+            sub:`${totalVocabCount} үг, дүрэм`,
+            color:"#ffa726",
+            bg:"#fff3e0",
+            badge:null,
+            action:()=>setTab("vocab"),
+          },
+          {
+            id:"leaderboard",
+            emoji:"🏆",
+            title:"Жагсаалт",
+            sub:`Ангийн ${classmates.length} сурагч`,
+            color:"#ffca28",
+            bg:"#fff8e1",
+            badge:null,
+            action:()=>setTab("leaderboard"),
+          },
+          {
+            id:"weak",
+            emoji:"⚠️",
+            title:"Эргэлзэж буй үгс",
+            sub:"Анхаарал хандуулах",
+            color:"#7e57c2",
+            bg:"#ede7f6",
+            badge:null,
+            action:()=>setTab("weak"),
+          },
+        ];
+
+        return(
+          <div className="k-fade">
+            {/* Дээд hero — өнөөдрийн progress */}
+            <div style={{
+              background:`linear-gradient(135deg,${t.accent}22,${t.accent}11)`,
+              borderRadius:22,padding:"18px 18px 14px",marginBottom:16,
+              border:`2px solid ${t.accent}33`,
+              position:"relative",overflow:"hidden",
+            }}>
+              <div style={{position:"absolute",top:-20,right:-20,fontSize:120,opacity:.1}}>🌸</div>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div className="k-bouncy" style={{
+                  width:56,height:56,borderRadius:18,background:"#fff",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,
+                  boxShadow:"0 4px 12px rgba(0,0,0,0.08)",flexShrink:0,
+                }}>
+                  {s.photo_url?(
+                    <img src={s.photo_url} style={{width:"100%",height:"100%",borderRadius:18,objectFit:"cover"}} alt=""/>
+                  ):t.emoji}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:11,color:t.accent,fontWeight:700,marginBottom:2}}>Сайн уу! 👋</div>
+                  <div style={{fontWeight:800,fontSize:17,color:t.text,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</div>
+                  <div style={{fontSize:11,color:t.text,opacity:.65,fontWeight:600}}>
+                    {todayName} · {TOPIK[s.level||0]}
+                  </div>
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:18,fontWeight:900,color:t.accent}}>⚡{s.xp||0}</div>
+                  <div style={{fontSize:9,color:t.text,opacity:.6,fontWeight:600}}>XP оноо</div>
+                </div>
+              </div>
+              {sess.length>0&&(
+                <div style={{marginTop:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:t.text,opacity:.75,fontWeight:600,marginBottom:4}}>
+                    <span>📅 Энэ сарын ирц</span>
+                    <span>{presentCount}/{sess.length}</span>
+                  </div>
+                  <div style={{height:8,background:"#fff",borderRadius:4,overflow:"hidden",boxShadow:"inset 0 1px 2px rgba(0,0,0,0.05)"}}>
+                    <div style={{
+                      height:"100%",
+                      width:`${sess.length>0?(presentCount/sess.length)*100:0}%`,
+                      background:`linear-gradient(90deg,${t.accent},${t.accent}cc)`,
+                      transition:"width .6s ease",
+                    }}/>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Habit tracker маягийн menu картууд */}
+            <div style={{fontWeight:700,fontSize:13,color:t.text,marginBottom:10,marginLeft:4,opacity:.7,letterSpacing:.5}}>
+              ✨ ӨНӨӨДӨР ЮУ ХИЙХ ВЭ?
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {menuItems.map((item,idx)=>(
+                <div key={item.id} onClick={item.action} className="k-press"
+                  style={{
+                    background:item.bg,
+                    borderRadius:18,padding:"14px 16px",
+                    display:"flex",alignItems:"center",gap:12,
+                    cursor:"pointer",
+                    animation:`kSlideUp .35s ease ${idx*0.05}s both`,
+                    boxShadow:"0 2px 8px rgba(0,0,0,0.04)",
+                    transition:"transform .15s ease, box-shadow .15s ease",
+                    position:"relative",
+                  }}
+                  onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 6px 16px rgba(0,0,0,0.08)";}}
+                  onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.04)";}}>
+                  <div style={{
+                    width:46,height:46,borderRadius:14,
+                    background:"#fff",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:24,flexShrink:0,
+                    boxShadow:"0 2px 6px rgba(0,0,0,0.06)",
+                  }}>
+                    {item.emoji}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:2}}>{item.title}</div>
+                    <div style={{fontSize:11,color:"#666",fontWeight:600}}>{item.sub}</div>
+                  </div>
+                  {item.badge&&(
+                    <div className="k-pop" style={{
+                      background:"#e53935",color:"#fff",
+                      minWidth:24,height:24,borderRadius:12,
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:11,fontWeight:800,padding:"0 8px",
+                      boxShadow:"0 2px 6px rgba(229,57,53,0.4)",
+                    }}>
+                      {item.badge}
+                    </div>
+                  )}
+                  <div style={{fontSize:18,color:item.color,opacity:.5,flexShrink:0,fontWeight:800}}>→</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer мэдрэмж */}
+            <div style={{textAlign:"center",marginTop:20,marginBottom:8,fontSize:11,color:t.text,opacity:.5}}>
+              🌸 화이팅! Чадна, өдөр болгон хичээх 🌸
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Хуучин бусад tabs (хадгалагдсан) */}
+      {tab!=="home"&&(
+        <div style={{display:"flex",gap:5,marginBottom:14,background:t.soft,borderRadius:12,padding:4,overflowX:"auto"}}>
+          <button onClick={()=>setTab("home")} className="k-press"
+            style={{minWidth:44,padding:"9px 12px",borderRadius:9,border:"none",
+              background:"transparent",color:t.text,fontWeight:700,fontSize:14,cursor:"pointer"}}>
+            🏠
+          </button>
+          {[["card","📋"],["daily","📅"],["homework","📝"],["vocab","📚"],["weak","⚠️"],["leaderboard","🏆"]].map(item=>{
+            const pendingHwCount=item[0]==="homework"?(() => {
+              const myHws=(homeworks||[]).filter(h=>h.class_id===s.class_id);
+              const submittedIds=new Set((homeworkSubs||[]).filter(hs=>hs.student_id===s.id).map(hs=>hs.homework_id));
+              return myHws.filter(h=>!submittedIds.has(h.id)&&new Date(h.due_date)>new Date()).length;
+            })():0;
+            return(
+              <button key={item[0]} onClick={()=>setTab(item[0])} className="k-press"
+                style={{flex:1,minWidth:44,padding:"9px 2px",borderRadius:9,border:"none",position:"relative",
+                  background:tab===item[0]?t.card:"transparent",
+                  color:tab===item[0]?t.accent:t.text,
+                  fontWeight:tab===item[0]?700:500,
+                  fontSize:16,cursor:"pointer",transition:"all .15s",
+                  boxShadow:tab===item[0]?`0 2px 8px ${t.accent}33`:"none"}}>{item[1]}
+                {pendingHwCount>0&&<span style={{position:"absolute",top:1,right:3,background:"#e53935",color:"#fff",borderRadius:8,padding:"0 4px",fontSize:9,fontWeight:800,minWidth:14,textAlign:"center"}}>{pendingHwCount}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {tab==="daily"&&<DailyCalendarTab vocabEntries={vocabEntries} t={t} classDays={classDays}/>}
       {tab==="leaderboard"&&<div className="k-fade" style={{background:t.card,borderRadius:18,padding:16,border:`2px solid ${t.border}`}}><div style={{fontWeight:700,fontSize:15,color:t.text,marginBottom:14,textAlign:"center"}}>🏆 Ангийн жагсаалт</div><Leaderboard students={classmates} myId={s.id} classColor={classColor||t.accent}/></div>}
       {tab==="vocab"&&<VocabTab vocabEntries={vocabEntries} t={t}/>}
@@ -5139,41 +5352,84 @@ function ClassDetail({cls,isAdmin,isSuperAdmin,students,setStudents,setClasses,g
         <div style={{background:"#fff",borderRadius:12,padding:10,marginBottom:12,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:12,fontWeight:600,color:"#555"}}>Сар:</span>
           <input type="month" value={attMonth} onChange={e=>setAttMonth(e.target.value)} style={{padding:"4px 8px",borderRadius:7,border:"1px solid #e0e0e0",fontSize:12,outline:"none"}}/>
-          <span style={{fontSize:11,color:"#aaa"}}>{getSessions(classDays,attMonth).length} хичээл</span>
+          <span style={{fontSize:11,color:"#aaa"}}>{getSessions(classDays,attMonth).length} оролт</span>
         </div>
 
-        {/* Student grid */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
-          {students.map(s=>{
-            const t2=getT(s.theme_id);
+        {/* Student list — Image 2 стиль (хэвтээ progress bar) */}
+        <div style={{background:"#fff",borderRadius:18,padding:14,marginBottom:14,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+            <div style={{fontWeight:800,fontSize:13,color:"#1a1a2e"}}>🎓 Сурагчдын идэвх</div>
+            <div style={{fontSize:11,color:"#aaa"}}>{students.length} сурагч</div>
+          </div>
+          {(() => {
             const sess=getSessions(classDays,attMonth);
-            const pres=sess.filter(item=>(s.attendance||{})[item.date]).length;
-            const due=(s.total_paid||0)<(s.total_fee||0);
-            return(
-              <div key={s.id} style={{background:t2.card,borderRadius:16,padding:11,border:`2px solid ${t2.border}`,position:"relative"}}>
-                {isSuperAdmin&&due&&<div style={{position:"absolute",top:8,right:8,width:8,height:8,borderRadius:"50%",background:"#f44336"}}/>}
-                {isAdmin&&<div onClick={()=>setConfirmDel(s.id)} style={{position:"absolute",top:7,left:7,width:18,height:18,borderRadius:"50%",background:"#ff000018",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:9,color:"#c62828",fontWeight:700,opacity:.7}}>✕</div>}
-                <div onClick={()=>setSelSid(s.id)} style={{cursor:"pointer"}}>
-                  <div style={{width:46,height:46,borderRadius:"50%",overflow:"hidden",margin:"6px auto 5px",border:`2px solid ${t2.accent}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>
-                    {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t2.emoji}
+            const totalSess=sess.length;
+            // Сурагчдыг ирц-ээр sort хийх (хамгийн идэвхтэй нь дээр)
+            const sortedStudents=[...students].map(s=>{
+              const pres=sess.filter(item=>(s.attendance||{})[item.date]).length;
+              const pct=totalSess>0?Math.round(pres/totalSess*100):0;
+              return {s,pres,pct};
+            }).sort((a,b)=>b.pct-a.pct);
+            return sortedStudents.map(({s,pres,pct},idx)=>{
+              const t2=getT(s.theme_id);
+              const due=(s.total_paid||0)<(s.total_fee||0);
+              const isTop=idx<3&&pct>0;
+              const medals=["🥇","🥈","🥉"];
+              return(
+                <div key={s.id} style={{
+                  display:"flex",alignItems:"center",gap:10,
+                  padding:"10px 4px",
+                  borderBottom:idx<sortedStudents.length-1?"1px solid #f5f5f5":"none",
+                  animation:`kSlideIn .3s ease ${idx*0.04}s both`,
+                  position:"relative",
+                }}>
+                  {/* Delete button (admin only) */}
+                  {isAdmin&&(
+                    <div onClick={()=>setConfirmDel(s.id)} style={{position:"absolute",top:6,right:0,width:16,height:16,borderRadius:"50%",background:"#fff0f0",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:9,color:"#c62828",fontWeight:700,opacity:.5}}>✕</div>
+                  )}
+                  {/* Avatar */}
+                  <div onClick={()=>setSelSid(s.id)} style={{cursor:"pointer",position:"relative",flexShrink:0}}>
+                    <div style={{width:42,height:42,borderRadius:"50%",overflow:"hidden",border:`2px solid ${t2.accent}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
+                      {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t2.emoji}
+                    </div>
+                    {isTop&&(
+                      <div style={{position:"absolute",bottom:-2,right:-2,fontSize:14,filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.2))"}}>{medals[idx]}</div>
+                    )}
+                    {isSuperAdmin&&due&&(
+                      <div style={{position:"absolute",top:-2,right:-2,width:10,height:10,borderRadius:"50%",background:"#f44336",border:"1.5px solid #fff"}}/>
+                    )}
                   </div>
-                  <div style={{textAlign:"center",fontWeight:700,fontSize:11,color:t2.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name.split(" ")[0]}</div>
-                  <div style={{textAlign:"center",fontSize:9,color:t2.accent,marginBottom:2}}>{TOPIK[s.level||0]}</div>
-                  <div style={{textAlign:"center",fontSize:9,color:t2.text,opacity:.5,marginBottom:3}}>⚡{s.xp||0} · 🔥{s.hw_streak||0}</div>
+                  {/* Name + progress bar */}
+                  <div onClick={()=>setSelSid(s.id)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
+                      <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,paddingRight:6}}>{s.name}</div>
+                      <div style={{fontSize:13,fontWeight:800,color:pct>=80?"#2e7d32":pct>=60?"#e65100":pct>0?"#c62828":"#bbb",flexShrink:0}}>{pct}%</div>
+                    </div>
+                    {/* Progress bar — Image 2 стиль ширэн pink/red bar */}
+                    <div style={{position:"relative",height:8,background:"#f5f5f5",borderRadius:6,overflow:"hidden"}}>
+                      <div style={{
+                        height:"100%",
+                        width:`${pct}%`,
+                        background:pct>=80?"linear-gradient(90deg,#66bb6a,#43a047)":pct>=60?"linear-gradient(90deg,#ffa726,#fb8c00)":pct>0?"linear-gradient(90deg,#ef5350,#e53935)":"#e0e0e0",
+                        borderRadius:6,
+                        transition:"width .6s ease",
+                      }}/>
+                    </div>
+                    <div style={{fontSize:9,color:"#888",marginTop:3,display:"flex",justifyContent:"space-between"}}>
+                      <span>{TOPIK[s.level||0]} · ⚡{s.xp||0}</span>
+                      <span>{pres}/{totalSess} оролт</span>
+                    </div>
+                  </div>
                 </div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:3}}>
-                  {sess.map(item=>{
-                    const ok=(s.attendance||{})[item.date]||false;
-                    return <div key={item.date} style={{width:12,height:12,borderRadius:3,background:ok?t2.accent:t2.soft,flexShrink:0}}/>;
-                  })}
-                </div>
-                <div style={{height:3,background:t2.soft,borderRadius:3}}>
-                  <div style={{height:3,background:t2.accent,borderRadius:3,width:`${sess.length?Math.round(pres/sess.length*100):0}%`}}/>
-                </div>
-                <div style={{textAlign:"center",fontSize:8,color:t2.text,opacity:.4,marginTop:2}}>{pres}/{sess.length}</div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
+          {students.length===0&&(
+            <div style={{textAlign:"center",padding:"30px 0",color:"#aaa",fontSize:13}}>
+              <div style={{fontSize:32,opacity:.4,marginBottom:6}}>👥</div>
+              Сурагч байхгүй байна
+            </div>
+          )}
         </div>
 
         {/* Confirm delete */}
@@ -5741,47 +5997,108 @@ export default function App(){
           );
         })()}
 
-        {/* Анги жагсаалт */}
-        <div style={{fontWeight:700,fontSize:14,color:"#555",marginBottom:8,marginLeft:4}}>📚 Миний ангиуд</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
+        {/* Анги жагсаалт — Habit Tracker маягийн дүрслэл */}
+        <div style={{fontWeight:700,fontSize:14,color:"#555",marginBottom:10,marginLeft:4,display:"flex",alignItems:"center",gap:6}}>
+          📚 Миний ангиуд <span style={{fontSize:11,color:"#aaa",fontWeight:600}}>· {fmtDate(TODAY)}</span>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {visibleClasses.map((cls,idx)=>{
             const cs=students.filter(s=>s.class_id===cls.id);
             const todayDow=new Date().getDay();
             const mapped=todayDow===0?7:todayDow;
             const isToday=(cls.days||[]).includes(mapped);
+            // Тухайн сард хэдэн оролт байгаа болон ирц
+            const sessions=getSessions(cls.days,attMonth);
+            const totalSessions=sessions.length;
+            // Бүх сурагчдын дундаж ирц
+            const avgAttendance=(()=>{
+              if(totalSessions===0||cs.length===0)return 0;
+              const totalAtt=cs.reduce((sum,s)=>{
+                const att=s.attendance||{};
+                return sum+sessions.filter(sess=>att[sess.date]).length;
+              },0);
+              return Math.round((totalAtt/(totalSessions*cs.length))*100);
+            })();
+            // Өнөөдөр хэдэн сурагч ирсэн
+            const todayPresent=cs.filter(s=>(s.attendance||{})[TODAY]).length;
+            // Pastel өнгө (Habit Tracker стиль)
+            const lightBg=cls.color+"1f"; // ~12% opacity
+            const fillColor=cls.color+"55"; // ~33% opacity
             return(
-              <div key={cls.id} onClick={()=>setSelCls(cls.id)} className="k-card-hover"
-                style={{background:"#fff",borderRadius:18,padding:16,boxShadow:"0 3px 14px #0001",borderTop:`4px solid ${cls.color}`,position:"relative",animation:`kSlideUp .35s ease ${idx*0.05}s both`}}>
-                {isToday&&(
-                  <div style={{position:"absolute",top:10,right:10,background:cls.color,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 8px",borderRadius:10}}>📍 ӨНӨӨДӨР</div>
-                )}
-                <div style={{fontWeight:800,fontSize:16,color:"#1a1a2e",marginBottom:3,paddingRight:isToday?70:0}}>{cls.name}</div>
-                <div style={{fontSize:11,color:"#888",marginBottom:10,display:"flex",alignItems:"center",gap:4}}>
-                  🕐 {cls.time}
-                  <span style={{opacity:.5}}>·</span>
-                  {(cls.days||[]).map(d=>(
-                    <span key={d} style={{background:isToday&&d===mapped?cls.color:"#f0f0f0",color:isToday&&d===mapped?"#fff":"#666",borderRadius:5,padding:"1px 5px",fontSize:10,fontWeight:600}}>{DLABELS[d]}</span>
-                  ))}
-                </div>
-                <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
-                  {cs.slice(0,8).map(s=>{
-                    const t2=getT(s.theme_id);
-                    return(
-                      <div key={s.id} title={s.name} style={{width:30,height:30,borderRadius:"50%",overflow:"hidden",border:`2px solid ${cls.color}`,background:t2.soft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>
-                        {s.photo_url?<img src={s.photo_url} style={{width:"100%",height:"100%",objectFit:"cover"}} alt=""/>:t2.emoji}
-                      </div>
-                    );
-                  })}
-                  {cs.length>8&&(
-                    <div style={{width:30,height:30,borderRadius:"50%",background:"#f0f0f0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:"#666"}}>+{cs.length-8}</div>
-                  )}
-                  <span style={{fontSize:11,color:"#888",marginLeft:"auto",fontWeight:600}}>👥 {cs.length}</span>
+              <div key={cls.id} onClick={()=>setSelCls(cls.id)} className="k-press"
+                style={{
+                  background:lightBg,
+                  borderRadius:20,
+                  position:"relative",overflow:"hidden",
+                  animation:`kSlideUp .35s ease ${idx*0.05}s both`,
+                  cursor:"pointer",
+                  transition:"transform .15s ease, box-shadow .15s ease",
+                  boxShadow:"0 2px 8px rgba(0,0,0,0.04)",
+                }}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 6px 16px rgba(0,0,0,0.08)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow="0 2px 8px rgba(0,0,0,0.04)";}}>
+                {/* Progress fill — Habit Tracker маягийн дүүрэн харагдах */}
+                <div style={{
+                  position:"absolute",left:0,top:0,bottom:0,
+                  width:`${avgAttendance}%`,
+                  background:fillColor,
+                  transition:"width .6s ease",
+                  pointerEvents:"none",
+                }}/>
+                {/* Контент — progress дээр давхар */}
+                <div style={{position:"relative",zIndex:1,padding:"16px 18px",display:"flex",alignItems:"center",gap:14}}>
+                  {/* Avatar icon (анх 1 сурагчийн зураг эсвэл emoji) */}
+                  <div style={{
+                    width:46,height:46,borderRadius:14,
+                    background:"#fff",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:22,
+                    boxShadow:"0 2px 6px rgba(0,0,0,0.08)",
+                    flexShrink:0,
+                  }}>
+                    {cs.length>0&&cs[0].photo_url?(
+                      <img src={cs[0].photo_url} style={{width:"100%",height:"100%",borderRadius:14,objectFit:"cover"}} alt=""/>
+                    ):(
+                      <span>🏫</span>
+                    )}
+                  </div>
+                  {/* Дунд хэсэг — нэр + мэдээлэл */}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                      <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cls.name}</div>
+                      {isToday&&<span style={{background:cls.color,color:"#fff",fontSize:9,fontWeight:800,padding:"2px 7px",borderRadius:8,whiteSpace:"nowrap"}}>📍 ӨНӨӨДӨР</span>}
+                    </div>
+                    <div style={{fontSize:11,color:"#555",fontWeight:600}}>
+                      {isToday?(
+                        <span>🕐 {cls.time} · 👥 {todayPresent}/{cs.length} ирсэн</span>
+                      ):(
+                        <span>🕐 {cls.time} · 📅 {totalSessions} оролт · 👥 {cs.length} сурагч</span>
+                      )}
+                    </div>
+                  </div>
+                  {/* Баруун — Streak + %*/}
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:4,justifyContent:"flex-end",marginBottom:2}}>
+                      <span style={{fontSize:14}}>🔥</span>
+                      <span style={{fontSize:13,fontWeight:800,color:"#1a1a2e"}}>{totalSessions} оролт</span>
+                    </div>
+                    <div style={{fontSize:18,fontWeight:900,color:avgAttendance>=80?"#2e7d32":avgAttendance>=60?"#e65100":"#c62828"}}>
+                      {avgAttendance}<span style={{fontSize:11,opacity:.7}}>%</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             );
           })}
           {visibleClasses.length===0&&(
-            <div style={{gridColumn:"1/-1",textAlign:"center",padding:"40px 20px",color:"#aaa",fontSize:14,background:"#fff",borderRadius:14}}>
+            <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa",fontSize:14,background:"#fff",borderRadius:14}}>
+              <div style={{fontSize:40,marginBottom:8,opacity:.4}}>📚</div>
+              Танд оноогдсон анги байхгүй байна.
+            </div>
+          )}
+        </div>
+          {visibleClasses.length===0&&(
+            <div style={{textAlign:"center",padding:"40px 20px",color:"#aaa",fontSize:14,background:"#fff",borderRadius:14}}>
               <div style={{fontSize:40,marginBottom:8,opacity:.4}}>📚</div>
               Танд оноогдсон анги байхгүй байна.
             </div>
