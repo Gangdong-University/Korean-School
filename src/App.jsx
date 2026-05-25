@@ -80,7 +80,7 @@ function speakKr(text) {
 
 // ── GEMINI AI ─────────────────────────────────────────────────────────
 // ⚠️ API key-ийг доорх мөрөнд тавьна уу (https://aistudio.google.com)
-const GEMINI_API_KEY = "AIzaSyDhy-9_H7DmXVvOXYHAaLc6JHyn8lFS93M"; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
+const GEMINI_API_KEY = ""; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`;
 
 async function geminiCall(prompt, opts = {}) {
@@ -492,8 +492,8 @@ function AuthScreen({ onAuth }) {
         ) : (
           <>
             <input placeholder="Овог нэр" value={regName} onChange={e => setRegName(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
-            <input placeholder="Утас (заавал биш)" value={regPhone} onChange={e => setRegPhone(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
-            <input placeholder="Регистр (заавал биш)" value={regRd} onChange={e => setRegRd(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
+            <input placeholder="Утас" value={regPhone} onChange={e => setRegPhone(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
+            <input placeholder="Регистр" value={regRd} onChange={e => setRegRd(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
             <select value={regClassId} onChange={e => setRegClassId(e.target.value)} style={{ ...INP, marginBottom: 8, cursor: "pointer" }}>
               <option value="">Сурах анги сонгох...</option>
               {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -592,7 +592,7 @@ function VocabTab({ vocabEntries, t }) {
 }
 
 // ── DailyCalendarTab (Өдөр өдрөөр харах) ─────────────────────────
-function DailyCalendarTab({ vocabEntries, t, classDays }) {
+function DailyCalendarTab({ vocabEntries, t, classDays, classStartDate, classColor }) {
   const [viewMonth, setViewMonth] = useState(NOW_MONTH);
   const [selDate, setSelDate] = useState(TODAY);
 
@@ -603,20 +603,25 @@ function DailyCalendarTab({ vocabEntries, t, classDays }) {
     const adjFirstDow = firstDow === 0 ? 6 : firstDow - 1; // Make Mon=0
     const days = [];
     for (let i = 0; i < adjFirstDow; i++) days.push(null);
+    const startD = classStartDate ? new Date(classStartDate) : null;
     for (let d = 1; d <= last; d++) {
       const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
       const dt = new Date(y, m - 1, d);
       let dow = dt.getDay(); dow = dow === 0 ? 7 : dow;
       const isLessonDay = (classDays || []).includes(dow);
+      // Анги эхэлсэн өдрөөс хойшхи хичээлийн өдөр л зөвхөн "идэвхтэй"
+      const isActiveLessonDay = isLessonDay && (!startD || dt >= startD);
+      const isBeforeStart = startD && dt < startD;
       const vocabCount = vocabEntries.filter(v => v.date === dateStr && v.type !== "grammar").length;
       const grammarCount = vocabEntries.filter(v => v.date === dateStr && v.type === "grammar").length;
-      days.push({ day: d, dateStr, isLessonDay, vocabCount, grammarCount, total: vocabCount + grammarCount });
+      days.push({ day: d, dateStr, isLessonDay, isActiveLessonDay, isBeforeStart, vocabCount, grammarCount, total: vocabCount + grammarCount });
     }
     return days;
-  }, [viewMonth, vocabEntries, classDays]);
+  }, [viewMonth, vocabEntries, classDays, classStartDate]);
 
   const selDayVocabs = vocabEntries.filter(v => v.date === selDate && v.type !== "grammar");
   const selDayGrammars = vocabEntries.filter(v => v.date === selDate && v.type === "grammar");
+  const lessonColor = classColor || t.accent;
 
   return (
     <div className="k-fade" style={{ background: t.card, borderRadius: 18, padding: 14, border: `2px solid ${t.border}` }}>
@@ -642,21 +647,43 @@ function DailyCalendarTab({ vocabEntries, t, classDays }) {
         ))}
       </div>
 
+      {/* Тайлбар */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 10, fontSize: 10, flexWrap: "wrap", justifyContent: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: lessonColor + "55", border: `1px solid ${lessonColor}` }} />
+          <span style={{ color: t.text, opacity: .7 }}>Хичээлийн өдөр</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: "transparent", border: `2px solid ${lessonColor}` }} />
+          <span style={{ color: t.text, opacity: .7 }}>Өнөөдөр</span>
+        </div>
+      </div>
+
       {/* Calendar grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginBottom: 14 }}>
         {monthDays.map((d, i) => {
           if (!d) return <div key={i} />;
           const isSel = d.dateStr === selDate;
           const isToday = d.dateStr === TODAY;
+          // Өнгөний логик
+          let bg = "transparent", borderC = "transparent", color = t.text;
+          if (isSel) {
+            bg = lessonColor; color = "#fff"; borderC = lessonColor;
+          } else if (d.isActiveLessonDay) {
+            bg = lessonColor + "33"; borderC = lessonColor + "88";
+          } else if (d.isBeforeStart) {
+            bg = "transparent"; color = "#ccc"; borderC = "transparent";
+          }
           return (
             <div key={i} onClick={() => setSelDate(d.dateStr)} className="k-press"
               style={{
                 aspectRatio: "1", borderRadius: 8, position: "relative",
-                background: isSel ? t.accent : (d.isLessonDay ? t.soft : "transparent"),
-                border: isToday ? `2px solid ${t.accent}` : `1px solid ${d.isLessonDay ? t.border : "transparent"}`,
-                color: isSel ? "#fff" : t.text,
+                background: bg,
+                border: isToday ? `2px solid ${lessonColor}` : `1px solid ${borderC}`,
+                color,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 cursor: "pointer", fontSize: 11, fontWeight: isToday ? 800 : 600,
+                opacity: d.isBeforeStart ? .4 : 1,
               }}>
               {d.day}
               {d.total > 0 && (
@@ -778,11 +805,11 @@ function AttendanceStats({ present, total, card }) {
       </div>
       <div style={{ flex: 1, background: card, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: "#2e7d32" }}>{present}</div>
-        <div style={{ fontSize: 9, color: "#888", fontWeight: 600 }}>оролтод оролцсон</div>
+        <div style={{ fontSize: 9, color: "#888", fontWeight: 600 }}>Ирсэн</div>
       </div>
       <div style={{ flex: 1, background: card, borderRadius: 10, padding: "8px 10px", textAlign: "center" }}>
         <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a2e" }}>{total}</div>
-        <div style={{ fontSize: 9, color: "#888", fontWeight: 600 }}>сарын нийт</div>
+        <div style={{ fontSize: 9, color: "#888", fontWeight: 600 }}>Нийт</div>
       </div>
     </div>
   );
@@ -821,13 +848,20 @@ function BulkAttendance({ students, classDays, setStudents, onClose, onToast }) 
   const save = async () => {
     setSaving(true);
     try {
-      for (const st of students) {
+      // Бүх сурагчийн ирцийг шинэчлэх
+      const updates = students.map(st => {
         const att = { ...(st.attendance || {}) };
         if (present.has(st.id)) att[date] = true; else delete att[date];
-        await supaUpdate("students", st.id, { attendance: att });
-        setStudents(prev => prev.map(x => x.id === st.id ? { ...x, attendance: att } : x));
-      }
-      onToast && onToast(`✅ ${students.length} сурагчийн ирц шинэчлэгдлээ`, "success");
+        return { id: st.id, attendance: att };
+      });
+      // Database-д бүгдийг parallel хадгалах
+      await Promise.all(updates.map(u => supaUpdate("students", u.id, { attendance: u.attendance })));
+      // State-ийг нэг удаа шинэчлэх (бүх сурагчдыг нэг дор)
+      setStudents(prev => prev.map(s => {
+        const u = updates.find(x => x.id === s.id);
+        return u ? { ...s, attendance: u.attendance } : s;
+      }));
+      onToast && onToast(`✅ ${students.length} сурагчийн ирц хадгалагдлаа`, "success");
       onClose();
     } catch (e) { onToast && onToast("❌ Алдаа: " + e.message, "error"); }
     setSaving(false);
@@ -2279,6 +2313,27 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
         </div>
       )}
 
+      {/* Үг + Дүрэм статистик */}
+      {vocabEntries && vocabEntries.length > 0 && (() => {
+        const vCount = vocabEntries.filter(v => v.type !== "grammar").length;
+        const gCount = vocabEntries.filter(v => v.type === "grammar").length;
+        return (
+          <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📚 Сурсан зүйлс</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <div style={{ background: t.soft, borderRadius: 10, padding: "8px 4px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: t.accent }}>{vCount}</div>
+                <div style={{ fontSize: 9, color: "#888", fontWeight: 700 }}>📚 үг</div>
+              </div>
+              <div style={{ background: t.soft, borderRadius: 10, padding: "8px 4px", textAlign: "center" }}>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#7c3aed" }}>{gCount}</div>
+                <div style={{ fontSize: 9, color: "#888", fontWeight: 700 }}>📖 дүрэм</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Сургалтын идэвх — Homework + Exam stats */}
       {(myHws.length > 0 || myExamSubs.length > 0) && (
         <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
@@ -2323,20 +2378,57 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
         </div>
       </div>
 
-      {/* Payment info (зөвхөн isSuperAdmin) */}
-      {isSuperAdmin && (s.total_fee || 0) > 0 && (
+      {/* Payment info — бүх хэрэглэгчид харуулна */}
+      {((s.total_fee || 0) > 0 || s.next_due) && (
         <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontWeight: 800, fontSize: 13, color: t.text }}>💰 Төлбөр</div>
-            {setShowPay && <button onClick={() => setShowPay(true)} style={btn(t.soft, t.accent)}>+ Нэмэх</button>}
+            {isSuperAdmin && setShowPay && <button onClick={() => setShowPay(true)} style={btn(t.soft, t.accent)}>+ Нэмэх</button>}
           </div>
-          <div style={{ height: 8, background: t.soft, borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
-            <div style={{ height: "100%", width: `${Math.min(100, ((s.total_paid || 0) / (s.total_fee || 1)) * 100)}%`, background: (s.total_paid || 0) >= (s.total_fee || 0) ? "#43a047" : t.accent }} />
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: t.text }}>
-            <span>{fmt(s.total_paid || 0)} ₮ төлсөн</span>
-            <span style={{ opacity: .7 }}>{fmt(s.total_fee || 0)} ₮ нийт</span>
-          </div>
+
+          {(s.total_fee || 0) > 0 && (
+            <>
+              <div style={{ height: 8, background: t.soft, borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
+                <div style={{ height: "100%", width: `${Math.min(100, ((s.total_paid || 0) / (s.total_fee || 1)) * 100)}%`, background: (s.total_paid || 0) >= (s.total_fee || 0) ? "#43a047" : t.accent }} />
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: t.text, marginBottom: s.next_due ? 8 : 0 }}>
+                <span>{fmt(s.total_paid || 0)} ₮ төлсөн</span>
+                <span style={{ opacity: .7 }}>{fmt(s.total_fee || 0)} ₮ нийт</span>
+              </div>
+            </>
+          )}
+
+          {/* Дараагийн төлбөрийн хугацаа */}
+          {s.next_due && (() => {
+            const dueDate = new Date(s.next_due);
+            const daysLeft = Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            const isOverdue = daysLeft < 0;
+            const isSoon = daysLeft >= 0 && daysLeft <= 7;
+            return (
+              <div style={{
+                background: isOverdue ? "#ffebee" : isSoon ? "#fff3cd" : "#e8f5e9",
+                border: `1px solid ${isOverdue ? "#ffcdd2" : isSoon ? "#ffe082" : "#a5d6a7"}`,
+                borderRadius: 10, padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ fontSize: 10, color: isOverdue ? "#c62828" : isSoon ? "#b8860b" : "#1b5e20", fontWeight: 700 }}>
+                    {isOverdue ? "⏰ ХОЦОРСОН" : isSoon ? "⚠️ ОЙРХОН" : "✅ ХУГАЦААТАЙ"}
+                  </div>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: "#1a1a2e", marginTop: 2 }}>
+                    Дараагийн төлбөр: {fmtDate(s.next_due)}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: isOverdue ? "#c62828" : isSoon ? "#b8860b" : "#1b5e20" }}>
+                    {Math.abs(daysLeft)}
+                  </div>
+                  <div style={{ fontSize: 9, color: "#888", fontWeight: 600 }}>
+                    {isOverdue ? "хоног хоцорсон" : "хоног үлдсэн"}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -2368,6 +2460,170 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
 // PART 10 — ClassDetail (Анги дотор — Image 2 шиг хэвтээ progress bar)
 // ════════════════════════════════════════════════════════════════════
 
+// ── EditClassModal — Ангийн нэр/цаг/өдөр/өнгө/эхлэсэн огноо засах ──
+function EditClassModal({ cls, onClose, onSaved, onToast }) {
+  const [name, setName] = useState(cls.name || "");
+  const [time, setTime] = useState(cls.time || "");
+  const [days, setDays] = useState(cls.days || []);
+  const [color, setColor] = useState(cls.color || "#7c3aed");
+  const [startDate, setStartDate] = useState(cls.start_date || TODAY);
+  const [saving, setSaving] = useState(false);
+
+  const toggleDay = (d) => setDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+
+  const save = async () => {
+    if (!name.trim() || !time.trim() || days.length === 0) {
+      onToast && onToast("❌ Бүгдийг бөглөнө үү", "error"); return;
+    }
+    setSaving(true);
+    try {
+      const updates = { name: name.trim(), time: time.trim(), days, color, start_date: startDate };
+      await supaUpdate("classes", cls.id, updates);
+      onSaved && onSaved(updates);
+      onClose();
+    } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+    setSaving(false);
+  };
+
+  return (
+    <Overlay onClose={onClose} maxW={420}>
+      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 24 }}>⚙️</span>
+        Ангийн тохиргоо
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>📌 АНГИЙН НЭР</div>
+        <input value={name} onChange={e => setName(e.target.value)} style={INP} />
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>🕐 ХИЧЭЭЛЛЭХ ЦАГ</div>
+        <input value={time} onChange={e => setTime(e.target.value)} placeholder="жишээ: 18:00" style={INP} />
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>📅 АНГИ ЭХЭЛСЭН ОГНОО</div>
+        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={INP} />
+        <div style={{ fontSize: 10, color: "#888", marginTop: 4 }}>Календарь дээр энэ өдрөөс хичээллэх өдрүүд харагдана</div>
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>📆 ХИЧЭЭЛЛЭХ ӨДРҮҮД</div>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {[1, 2, 3, 4, 5, 6, 7].map(d => {
+            const sel = days.includes(d);
+            return (
+              <button key={d} onClick={() => toggleDay(d)} style={{
+                padding: "8px 12px", borderRadius: 10,
+                border: sel ? "2px solid #1976d2" : "2px solid #e0e0e0",
+                background: sel ? "#e3f2fd" : "#fff", color: sel ? "#1976d2" : "#666",
+                fontWeight: 800, fontSize: 11, cursor: "pointer",
+              }}>{DLABELS[d]}</button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>🎨 ӨНГӨ</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["#e91e8c", "#7c3aed", "#43a047", "#f57c00", "#1976d2", "#00897b", "#c62828", "#5d4037"].map(c => (
+            <div key={c} onClick={() => setColor(c)} style={{
+              width: 36, height: 36, borderRadius: 10, background: c, cursor: "pointer",
+              border: color === c ? "3px solid #1a1a2e" : "2px solid #fff",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+            }} />
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onClose} style={{ ...btn("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+        <button onClick={save} disabled={saving} style={{ ...btn("#1976d2", "#fff"), flex: 2, justifyContent: "center", boxShadow: "0 3px 0 #0d47a1" }}>
+          {saving ? "⏳..." : "💾 Хадгалах"}
+        </button>
+      </div>
+    </Overlay>
+  );
+}
+
+// ── CopyVocabsModal — Сонгосон үг/дүрмийг өөр анги руу хуулах ──
+function CopyVocabsModal({ sourceClass, vocabsToCopy, allClasses, onClose, onCopied, onToast }) {
+  const [targetClassId, setTargetClassId] = useState("");
+  const [targetDate, setTargetDate] = useState(TODAY);
+  const [classes, setClassesLocal] = useState(allClasses);
+  const [copying, setCopying] = useState(false);
+
+  useEffect(() => {
+    if (!classes || classes.length === 0) {
+      supaSelect("classes").then(setClassesLocal);
+    }
+  }, []);
+
+  const otherClasses = (classes || []).filter(c => c.id !== sourceClass.id);
+
+  const copy = async () => {
+    if (!targetClassId) { onToast && onToast("❌ Анги сонгоно уу", "error"); return; }
+    if (vocabsToCopy.length === 0) { onToast && onToast("❌ Хуулах үг байхгүй", "error"); return; }
+    setCopying(true);
+    try {
+      const inserts = vocabsToCopy.map(v => ({
+        id: `v${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+        class_id: targetClassId,
+        word: v.word, meaning: v.meaning, type: v.type || "vocab", date: targetDate,
+      }));
+      await Promise.all(inserts.map(item => supaInsert("vocab_entries", item)));
+      const targetCls = otherClasses.find(c => c.id === targetClassId);
+      onToast && onToast(`✅ ${vocabsToCopy.length} үг "${targetCls?.name || "—"}"-руу хуулагдлаа`, "success");
+      onCopied && onCopied();
+      onClose();
+    } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+    setCopying(false);
+  };
+
+  return (
+    <Overlay onClose={onClose} maxW={420}>
+      <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 24 }}>📋</span>
+        Үгсийг хуулах
+      </div>
+
+      <div style={{ background: "#e3f2fd", borderRadius: 12, padding: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 4 }}>📦 ХУУЛАХ ЗҮЙЛС ({vocabsToCopy.length})</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, maxHeight: 80, overflowY: "auto" }}>
+          {vocabsToCopy.slice(0, 20).map(v => (
+            <span key={v.id} style={{ background: "#fff", border: "1px solid #90caf9", borderRadius: 6, padding: "2px 7px", fontSize: 10, fontWeight: 700, color: v.type === "grammar" ? "#7c3aed" : "#1976d2" }}>
+              {v.type === "grammar" ? "📖" : "📚"} {v.word}
+            </span>
+          ))}
+          {vocabsToCopy.length > 20 && <span style={{ opacity: .6, fontSize: 10 }}>+{vocabsToCopy.length - 20}</span>}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>🎯 АЛЬ АНГИ РУУ?</div>
+        <select value={targetClassId} onChange={e => setTargetClassId(e.target.value)} style={{ ...INP, cursor: "pointer" }}>
+          <option value="">Анги сонгох...</option>
+          {otherClasses.map(c => <option key={c.id} value={c.id}>{c.name} ({c.time})</option>)}
+        </select>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>📅 АЛЬ ӨДӨРТ?</div>
+        <input type="date" value={targetDate} onChange={e => setTargetDate(e.target.value)} style={INP} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onClose} style={{ ...btn("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+        <button onClick={copy} disabled={copying || !targetClassId} style={{ ...btn("#1976d2", "#fff"), flex: 2, justifyContent: "center", boxShadow: "0 3px 0 #0d47a1", opacity: (copying || !targetClassId) ? .5 : 1 }}>
+          {copying ? "⏳..." : `📋 ${vocabsToCopy.length} үг хуулах`}
+        </button>
+      </div>
+    </Overlay>
+  );
+}
+
 function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setClasses,
   goBack, attMonth, setAttMonth, teacherId, homeworks, homeworkSubs, exams, examSubs,
   vocabEntries, refreshAll, onToast, onSelectStudent }) {
@@ -2380,6 +2636,9 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
   const [selExam, setSelExam] = useState(null);
   const [confirmDelCls, setConfirmDelCls] = useState(false);
   const [confirmDelSt, setConfirmDelSt] = useState(null);
+  const [showEditCls, setShowEditCls] = useState(false);
+  const [showCopyVocabs, setShowCopyVocabs] = useState(false);
+  const [selectedVocabIds, setSelectedVocabIds] = useState(new Set());
   // Vocab add
   const [vocabDate, setVocabDate] = useState(TODAY);
   const [vocabType, setVocabType] = useState("vocab");
@@ -2503,6 +2762,7 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
           </button>
           <button onClick={() => setShowVocab(v => !v)} style={btn("#fff3cd", "#b8860b", "#f9a825")}>{showVocab ? "✕" : "📚"}</button>
           <button onClick={() => setShowAddSt(true)} style={btn(cls.color, "#fff")}>+ Сурагч</button>
+          {isAdmin && <button onClick={() => setShowEditCls(true)} style={btn("#f0f4ff", "#1976d2", "#90caf9")}>⚙️</button>}
           {isSuperAdmin && <button onClick={() => setConfirmDelCls(true)} style={btn("#fff0f0", "#e53935", "#ffcdd2")}>🗑️</button>}
         </div>
       )}
@@ -2537,19 +2797,73 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
             <button onClick={addVocab} style={{ ...btn("#7c3aed", "#fff"), boxShadow: "0 3px 0 #5b21b6" }}>+ Нэмэх</button>
           </div>
 
-          {/* Сонгосон өдрийн үгс */}
+          {/* Сонгосон өдрийн үгс — checkbox-той + copy товч */}
           {(() => {
             const dayVocabs = classVocabs.filter(v => v.date === vocabDate);
             if (dayVocabs.length === 0) return null;
+            const allSelected = dayVocabs.every(v => selectedVocabIds.has(v.id));
+            const someSelected = selectedVocabIds.size > 0;
             return (
-              <div>
-                <div style={{ fontSize: 11, color: "#888", marginBottom: 5, fontWeight: 700 }}>{vocabDate} өдрийн үгс ({dayVocabs.length})</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {dayVocabs.map(v => (
-                    <span key={v.id} style={{ background: "#fff", border: "1px solid #ffe082", borderRadius: 6, padding: "3px 7px", fontSize: 11, fontWeight: 700, color: "#b8860b" }}>
-                      {v.word} <span style={{ opacity: .6, fontWeight: 500 }}>{v.meaning}</span>
-                    </span>
-                  ))}
+              <div style={{ marginTop: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{vocabDate} өдрийн үгс ({dayVocabs.length})</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => {
+                      if (allSelected) {
+                        const ns = new Set(selectedVocabIds);
+                        dayVocabs.forEach(v => ns.delete(v.id));
+                        setSelectedVocabIds(ns);
+                      } else {
+                        const ns = new Set(selectedVocabIds);
+                        dayVocabs.forEach(v => ns.add(v.id));
+                        setSelectedVocabIds(ns);
+                      }
+                    }} style={{ ...btn("#fff", "#1976d2", "#90caf9"), padding: "4px 8px", fontSize: 11 }}>
+                      {allSelected ? "✕ Бүгдийг" : "✓ Бүгдийг"}
+                    </button>
+                    {someSelected && (
+                      <button onClick={() => setShowCopyVocabs(true)} className="k-pop"
+                        style={{ ...btn("#1976d2", "#fff"), padding: "4px 10px", fontSize: 11, boxShadow: "0 2px 0 #0d47a1" }}>
+                        📋 {selectedVocabIds.size} хуулах
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {dayVocabs.map(v => {
+                    const isSel = selectedVocabIds.has(v.id);
+                    return (
+                      <div key={v.id} onClick={() => {
+                        const ns = new Set(selectedVocabIds);
+                        if (isSel) ns.delete(v.id); else ns.add(v.id);
+                        setSelectedVocabIds(ns);
+                      }} className="k-press"
+                        style={{
+                          background: isSel ? "#e3f2fd" : "#fff",
+                          border: isSel ? "1px solid #1976d2" : "1px solid #ffe082",
+                          borderRadius: 8, padding: "6px 10px",
+                          display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                        }}>
+                        <div style={{ width: 18, height: 18, borderRadius: 5, background: isSel ? "#1976d2" : "#fff", border: `2px solid ${isSel ? "#1976d2" : "#ccc"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+                          {isSel ? "✓" : ""}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontSize: 13, fontWeight: 800, color: v.type === "grammar" ? "#7c3aed" : "#b8860b" }}>
+                            {v.type === "grammar" ? "📖" : "📚"} {v.word}
+                          </span>
+                          <span style={{ fontSize: 11, color: "#666", marginLeft: 8 }}>{v.meaning}</span>
+                        </div>
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`"${v.word}" устгах уу?`)) {
+                            supaDelete("vocab_entries", v.id).then(() => {
+                              refreshAll && refreshAll();
+                            });
+                          }
+                        }} style={{ background: "transparent", border: "none", color: "#c62828", cursor: "pointer", fontSize: 14, padding: 2 }}>✕</button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -2579,73 +2893,83 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
         <span style={{ fontSize: 11, color: "#aaa" }}>{sessions.length} оролт</span>
       </div>
 
-      {/* СУРАГЧИЙН ИДЭВХ — Image 2 шиг хэвтээ progress bar */}
-      <div style={{ background: "#fff", borderRadius: 18, padding: 14, marginBottom: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: "#1a1a2e" }}>🎓 Сурагчдын идэвх</div>
+      {/* СУРАГЧИЙН ИДЭВХ — Олон theme-тэй дөрвөлжин карт */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, paddingLeft: 4 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "#1a1a2e" }}>🎓 Сурагчид</div>
           <div style={{ fontSize: 11, color: "#aaa" }}>{students.length} сурагч</div>
         </div>
 
         {sortedStudents.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#aaa", fontSize: 13 }}>
-            <div style={{ fontSize: 32, opacity: .4, marginBottom: 6 }}>👥</div>
+          <div style={{ background: "#fff", borderRadius: 18, textAlign: "center", padding: "40px 20px", color: "#aaa", fontSize: 13 }}>
+            <div style={{ fontSize: 40, opacity: .4, marginBottom: 8 }}>👥</div>
             Сурагч байхгүй байна
           </div>
-        ) : sortedStudents.map(({ s, pres, pct }, idx) => {
-          const t2 = getTheme(s.theme_id);
-          const due = (s.total_paid || 0) < (s.total_fee || 0);
-          const isTop = idx < 3 && pct > 0;
-          const medals = ["🥇", "🥈", "🥉"];
-          return (
-            <div key={s.id} style={{
-              display: "flex", alignItems: "center", gap: 10,
-              padding: "10px 4px", position: "relative",
-              borderBottom: idx < sortedStudents.length - 1 ? "1px solid #f5f5f5" : "none",
-              animation: `kSlide .3s ease ${idx * 0.04}s both`,
-            }}>
-              {/* Delete button */}
-              {isAdmin && (
-                <div onClick={() => setConfirmDelSt(s)}
-                  style={{ position: "absolute", top: 6, right: 0, width: 16, height: 16, borderRadius: "50%", background: "#fff0f0", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 9, color: "#c62828", fontWeight: 700, opacity: .5 }}>✕</div>
-              )}
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10 }}>
+            {sortedStudents.map(({ s, pres, pct }, idx) => {
+              const t2 = getTheme(s.theme_id);
+              const due = (s.total_paid || 0) < (s.total_fee || 0);
+              const isTop = idx < 3 && pct > 0;
+              const medals = ["🥇", "🥈", "🥉"];
+              return (
+                <div key={s.id} style={{
+                  background: t2.card, borderRadius: 16, padding: 11,
+                  border: `2px solid ${t2.border}`, position: "relative",
+                  animation: `kSlideUp .3s ease ${idx * 0.04}s both`,
+                }}>
+                  {/* Хоцорсон төлбөрийн dot (зөвхөн сүпэр-админ) */}
+                  {isSuperAdmin && due && (
+                    <div style={{ position: "absolute", top: 8, right: 8, width: 8, height: 8, borderRadius: "50%", background: "#f44336" }} />
+                  )}
+                  {/* Delete button (зөвхөн admin) */}
+                  {isAdmin && (
+                    <div onClick={() => setConfirmDelSt(s)}
+                      style={{ position: "absolute", top: 7, left: 7, width: 18, height: 18, borderRadius: "50%", background: "#ff000018", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 9, color: "#c62828", fontWeight: 700, opacity: .7 }}>✕</div>
+                  )}
+                  {/* Top-3 medal */}
+                  {isTop && (
+                    <div style={{ position: "absolute", top: 5, right: due && isSuperAdmin ? 22 : 7, fontSize: 16, filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.2))" }}>{medals[idx]}</div>
+                  )}
 
-              {/* Avatar */}
-              <div onClick={() => onSelectStudent && onSelectStudent(s.id)} style={{ cursor: "pointer", position: "relative", flexShrink: 0 }}>
-                <div style={{ width: 42, height: 42, borderRadius: "50%", overflow: "hidden", background: t2.soft, border: `2px solid ${t2.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>
-                  {s.photo_url ? <img src={s.photo_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : t2.emoji}
-                </div>
-                {isTop && (
-                  <div style={{ position: "absolute", bottom: -2, right: -2, fontSize: 14, filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.2))" }}>{medals[idx]}</div>
-                )}
-                {isSuperAdmin && due && (
-                  <div style={{ position: "absolute", top: -2, right: -2, width: 10, height: 10, borderRadius: "50%", background: "#f44336", border: "1.5px solid #fff" }} />
-                )}
-              </div>
+                  <div onClick={() => onSelectStudent && onSelectStudent(s.id)} style={{ cursor: "pointer" }}>
+                    {/* Том avatar */}
+                    <div style={{
+                      width: 56, height: 56, borderRadius: "50%", overflow: "hidden",
+                      margin: "6px auto 8px",
+                      border: `3px solid ${t2.accent}`, background: t2.soft,
+                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.1)",
+                    }}>
+                      {s.photo_url ? <img src={s.photo_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : t2.emoji}
+                    </div>
+                    {/* Нэр */}
+                    <div style={{ textAlign: "center", fontWeight: 800, fontSize: 12, color: t2.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                    {/* TOPIK түвшин */}
+                    <div style={{ textAlign: "center", fontSize: 10, color: t2.accent, fontWeight: 700, marginBottom: 3 }}>{TOPIK[s.level || 0]}</div>
+                    {/* XP */}
+                    <div style={{ textAlign: "center", fontSize: 10, color: t2.text, opacity: .65, marginBottom: 6, fontWeight: 600 }}>⚡ {s.xp || 0} XP</div>
+                  </div>
 
-              {/* Name + progress bar */}
-              <div onClick={() => onSelectStudent && onSelectStudent(s.id)} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, paddingRight: 6 }}>{s.name}</div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: pct >= 80 ? "#2e7d32" : pct >= 60 ? "#e65100" : pct > 0 ? "#c62828" : "#bbb", flexShrink: 0 }}>{pct}%</div>
+                  {/* Ирц dot grid */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5, justifyContent: "center" }}>
+                    {sessions.slice(0, 12).map(item => {
+                      const ok = (s.attendance || {})[item.date] || false;
+                      return <div key={item.date} title={item.date} style={{ width: 11, height: 11, borderRadius: 3, background: ok ? t2.accent : t2.soft, border: `1px solid ${ok ? t2.accent : t2.border}`, flexShrink: 0 }} />;
+                    })}
+                  </div>
+                  {/* Progress bar */}
+                  <div style={{ height: 4, background: t2.soft, borderRadius: 3, overflow: "hidden", marginBottom: 3 }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: pct >= 80 ? "#43a047" : pct >= 60 ? "#fb8c00" : pct > 0 ? "#e53935" : t2.border, transition: "width .6s" }} />
+                  </div>
+                  <div style={{ textAlign: "center", fontSize: 9, color: t2.text, opacity: .55, fontWeight: 700 }}>
+                    {pres}/{sessions.length} оролт · {pct}%
+                  </div>
                 </div>
-                {/* Image 2 шиг pink/red gradient bar */}
-                <div style={{ position: "relative", height: 8, background: "#f5f5f5", borderRadius: 6, overflow: "hidden" }}>
-                  <div style={{
-                    height: "100%", width: `${pct}%`,
-                    background: pct >= 80 ? "linear-gradient(90deg,#66bb6a,#43a047)"
-                      : pct >= 60 ? "linear-gradient(90deg,#ffa726,#fb8c00)"
-                      : pct > 0 ? "linear-gradient(90deg,#ef5350,#e53935)" : "#e0e0e0",
-                    borderRadius: 6, transition: "width .6s ease",
-                  }} />
-                </div>
-                <div style={{ fontSize: 9, color: "#888", marginTop: 3, display: "flex", justifyContent: "space-between" }}>
-                  <span>{TOPIK[s.level || 0]} · ⚡{s.xp || 0}</span>
-                  <span>{pres}/{sessions.length} оролт</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* MODALS */}
@@ -2724,6 +3048,22 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
           </div>
         </Overlay>
       )}
+
+      {/* Edit Class Settings */}
+      {showEditCls && (
+        <EditClassModal cls={cls} onClose={() => setShowEditCls(false)} onSaved={(updated) => {
+          setClasses && setClasses(prev => prev.map(c => c.id === cls.id ? { ...c, ...updated } : c));
+          refreshAll && refreshAll();
+          onToast && onToast("✅ Анги шинэчлэгдлээ", "success");
+        }} onToast={onToast} />
+      )}
+
+      {/* Copy Vocabs to other class */}
+      {showCopyVocabs && (
+        <CopyVocabsModal sourceClass={cls} vocabsToCopy={classVocabs.filter(v => selectedVocabIds.has(v.id))}
+          allClasses={[]} onClose={() => { setShowCopyVocabs(false); setSelectedVocabIds(new Set()); }}
+          onCopied={() => { refreshAll && refreshAll(); setSelectedVocabIds(new Set()); }} onToast={onToast} />
+      )}
     </div>
   );
 }
@@ -2731,13 +3071,14 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
 // PART 11 — StudentView (Сурагчийн дэлгэц — Image 1 шиг Habit Tracker)
 // ════════════════════════════════════════════════════════════════════
 
-function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays, vocabEntries, classmates, classColor,
+function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays, classStartDate, vocabEntries, classmates, classColor,
   homeworks, homeworkSubs, exams, examSubs, refreshAll, onToast }) {
   const [view, setView] = useState("home"); // home | card | daily | vocab | leaderboard
   const [showPractice, setShowPractice] = useState(false);
   const [activeHw, setActiveHw] = useState(null);
   const [activeExam, setActiveExam] = useState(null);
   const [showChangePw, setShowChangePw] = useState(false);
+  const [showThemePicker, setShowThemePicker] = useState(false);
   const [editNotes, setEditNotes] = useState(false);
   const [notes, setNotes] = useState(s.teacher_notes || "");
   const [hwTab, setHwTab] = useState("pending"); // pending | done | overdue
@@ -2849,7 +3190,10 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
           if (window.confirm("Системээс гарах уу?")) goBack();
         }} style={btn("#fff", t.text, t.border)}>← Гарах</button>
         <div style={{ fontWeight: 800, fontSize: 14, color: t.accent }}>🌸 Кандун</div>
-        <button onClick={() => setShowChangePw(true)} style={btn(t.soft, t.accent)}>🔑</button>
+        <div style={{ display: "flex", gap: 5 }}>
+          <button onClick={() => setShowThemePicker(true)} style={btn(t.soft, t.accent)} title="Theme солих">🎨</button>
+          <button onClick={() => setShowChangePw(true)} style={btn(t.soft, t.accent)} title="Нууц үг солих">🔑</button>
+        </div>
       </div>
 
       {/* ── ИДЭВХТЭЙ ШАЛГАЛТЫН POPUP ── */}
@@ -2920,10 +3264,14 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
             ✨ ӨНӨӨДӨР ЮУ ХИЙХ ВЭ?
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {[
+            {(() => {
+              const vocabCount = vocabEntries.filter(v => v.type !== "grammar").length;
+              const grammarCount = vocabEntries.filter(v => v.type === "grammar").length;
+              const vocabSummary = `${vocabCount} үг · ${grammarCount} дүрэм`;
+              return [
               {
                 id: "practice", emoji: "🎓", title: "Солонгос хэлээ бэлдэх",
-                sub: `${vocabEntries.length} үг бэлэн`, bg: "#e3f2fd", color: "#42a5f5",
+                sub: vocabSummary, bg: "#e3f2fd", color: "#42a5f5",
                 action: () => setShowPractice(true),
               },
               {
@@ -2950,7 +3298,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
               },
               {
                 id: "vocab", emoji: "📚", title: "Үгсийн сан",
-                sub: `${vocabEntries.length} үг, дүрэм`, bg: "#fff3e0", color: "#ffa726",
+                sub: vocabSummary, bg: "#fff3e0", color: "#ffa726",
                 action: () => setView("vocab"),
               },
               {
@@ -2958,7 +3306,8 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
                 sub: `Ангийн ${classmates.length} сурагч`, bg: "#fff8e1", color: "#ffca28",
                 action: () => setView("leaderboard"),
               },
-            ].map((item, idx) => (
+            ];
+            })().map((item, idx) => (
               <div key={item.id} onClick={item.action} className="k-press"
                 style={{
                   background: item.bg, borderRadius: 18, padding: "14px 16px",
@@ -3007,7 +3356,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
           homeworks={homeworks} homeworkSubs={homeworkSubs} exams={exams} examSubs={examSubs} />
       )}
 
-      {view === "daily" && <DailyCalendarTab vocabEntries={vocabEntries} t={t} classDays={classDays} />}
+      {view === "daily" && <DailyCalendarTab vocabEntries={vocabEntries} t={t} classDays={classDays} classStartDate={classStartDate} classColor={classColor} />}
       {view === "vocab" && <VocabTab vocabEntries={vocabEntries} t={t} />}
       {view === "leaderboard" && (
         <div className="k-fade" style={{ background: t.card, borderRadius: 18, padding: 16, border: `2px solid ${t.border}` }}>
@@ -3067,6 +3416,40 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
       {showChangePw && (
         <ChangePasswordModal studentId={s.id} onClose={() => setShowChangePw(false)} onToast={onToast} />
       )}
+
+      {/* Theme picker */}
+      {showThemePicker && (
+        <Overlay onClose={() => setShowThemePicker(false)} maxW={400}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 24 }}>🎨</span>
+            Theme сонгох
+          </div>
+          <div style={{ fontSize: 11, color: "#888", marginBottom: 14 }}>Аппын өнгийг сонгоно уу</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {THEMES.map(theme => {
+              const isSel = s.theme_id === theme.id;
+              return (
+                <div key={theme.id} onClick={async () => {
+                  await upd({ theme_id: theme.id });
+                  onToast && onToast(`${theme.emoji} ${theme.name} сонгогдлоо`, "success");
+                  setShowThemePicker(false);
+                }} className="k-press"
+                  style={{
+                    background: theme.card, borderRadius: 14, padding: 14, cursor: "pointer",
+                    border: isSel ? `3px solid ${theme.accent}` : `2px solid ${theme.border}`,
+                    textAlign: "center", transition: "all .2s",
+                  }}>
+                  <div style={{ fontSize: 36, marginBottom: 6 }}>{theme.emoji}</div>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: theme.text }}>{theme.name}</div>
+                  {isSel && (
+                    <div style={{ marginTop: 4, fontSize: 10, color: theme.accent, fontWeight: 800 }}>✓ ИДЭВХТЭЙ</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Overlay>
+      )}
     </div>
   );
 }
@@ -3079,6 +3462,12 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
   homeworks, homeworkSubs, exams, examSubs, isSuperAdmin, onToast }) {
   const [editNotes, setEditNotes] = useState(false);
   const [notes, setNotes] = useState(s.teacher_notes || "");
+  const [showEditInfo, setShowEditInfo] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: s.name || "", phone: s.phone || "", email: s.email || "",
+    enroll_date: s.enroll_date || "", level: s.level || 0,
+    total_fee: s.total_fee || 0, next_due: s.next_due || "",
+  });
 
   const t = getTheme(s.theme_id);
   const sessions = getSessions(classDays, attMonth);
@@ -3097,6 +3486,23 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
     await upd({ attendance: att });
   };
 
+  const saveInfo = async () => {
+    try {
+      const updates = {
+        name: editForm.name.trim() || s.name,
+        phone: editForm.phone.trim() || null,
+        email: editForm.email.trim() || s.email,
+        enroll_date: editForm.enroll_date || null,
+        level: parseInt(editForm.level) || 0,
+        total_fee: parseInt(editForm.total_fee) || 0,
+        next_due: editForm.next_due || null,
+      };
+      await upd(updates);
+      onToast && onToast("✅ Хадгалагдлаа", "success");
+      setShowEditInfo(false);
+    } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: t.bg, fontFamily: "system-ui", padding: 14, paddingBottom: 30 }}>
       <style>{ANIMATIONS}</style>
@@ -3104,7 +3510,7 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
         <button onClick={goBack} style={btn("#fff", t.text, t.border)}>← Буцах</button>
         <div style={{ fontWeight: 800, fontSize: 14, color: t.accent }}>{s.name}</div>
-        <div style={{ width: 60 }} />
+        <button onClick={() => setShowEditInfo(true)} style={btn(t.soft, t.accent)}>✏️</button>
       </div>
 
       <CardContent s={s} t={t} isAdmin={true} isSuperAdmin={isSuperAdmin} upd={upd}
@@ -3113,6 +3519,64 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
         onToggleAtt={toggleAtt} setShowPay={null}
         editNotes={editNotes} setEditNotes={setEditNotes} notes={notes} setNotes={setNotes}
         homeworks={homeworks} homeworkSubs={homeworkSubs} exams={exams} examSubs={examSubs} />
+
+      {/* Сурагчийн мэдээлэл засах */}
+      {showEditInfo && (
+        <Overlay onClose={() => setShowEditInfo(false)} maxW={420}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 24 }}>✏️</span>
+            Сурагчийн мэдээлэл засах
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>👤 НЭР</div>
+            <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} style={INP} />
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📞 УТАС</div>
+            <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} style={INP} />
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📧 И-МЭЙЛ</div>
+            <input value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} style={INP} />
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📅 БҮРТГҮҮЛСЭН ОГНОО</div>
+            <input type="date" value={editForm.enroll_date} onChange={e => setEditForm({ ...editForm, enroll_date: e.target.value })} style={INP} />
+            <div style={{ fontSize: 10, color: "#888", marginTop: 3 }}>Хичээл эхэлсэн анхны өдөр</div>
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📊 TOPIK ТҮВШИН</div>
+            <select value={editForm.level} onChange={e => setEditForm({ ...editForm, level: e.target.value })} style={{ ...INP, cursor: "pointer" }}>
+              {TOPIK.map((tp, i) => <option key={i} value={i}>{tp}</option>)}
+            </select>
+          </div>
+
+          {isSuperAdmin && (
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>💰 НИЙТ ТӨЛБӨР (₮)</div>
+                <input type="number" value={editForm.total_fee} onChange={e => setEditForm({ ...editForm, total_fee: e.target.value })} style={INP} />
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>⏰ ДАРААГИЙН ТӨЛБӨРИЙН ХУГАЦАА</div>
+                <input type="date" value={editForm.next_due} onChange={e => setEditForm({ ...editForm, next_due: e.target.value })} style={INP} />
+              </div>
+            </>
+          )}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowEditInfo(false)} style={{ ...btn("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+            <button onClick={saveInfo} style={{ ...btn(t.accent, "#fff"), flex: 2, justifyContent: "center", boxShadow: `0 3px 0 ${t.border}` }}>
+              💾 Хадгалах
+            </button>
+          </div>
+        </Overlay>
+      )}
     </div>
   );
 }
@@ -3139,6 +3603,7 @@ export default function App() {
   const [attMonth, setAttMonth] = useState(NOW_MONTH);
   const [showAddCls, setShowAddCls] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showOverdueDetail, setShowOverdueDetail] = useState(false);
   const [loading, setLoading] = useState(!!user);
   const [toast, setToast] = useState(null);
   // New class form
@@ -3236,7 +3701,7 @@ export default function App() {
         <StudentView
           s={s} setStudents={setStudents} goBack={() => setUser(null)}
           attMonth={attMonth} setAttMonth={setAttMonth}
-          classDays={cls?.days || []} vocabEntries={classVocabs}
+          classDays={cls?.days || []} classStartDate={cls?.start_date} vocabEntries={classVocabs}
           classmates={classmates} classColor={cls?.color || "#7c3aed"}
           homeworks={homeworks} homeworkSubs={homeworkSubs}
           exams={exams} examSubs={examSubs}
@@ -3349,27 +3814,64 @@ export default function App() {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8 }}>
-            <div style={{ background: "#f5f0ff", borderRadius: 12, padding: "10px 12px", borderLeft: "3px solid #7c3aed" }}>
-              <div style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, marginBottom: 2 }}>📚 ӨНӨӨДӨР</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>{todayClasses.length} анги</div>
-              <div style={{ fontSize: 10, color: "#666", marginTop: 1 }}>
-                {todayClasses.length > 0 ? todayClasses.map(c => c.name).join(", ").slice(0, 30) : "Хичээл байхгүй"}
+          {(() => {
+            // Хоцорсон төлбөртэй сурагчид
+            const overdueStudents = allStudents.filter(s => {
+              if (!s.next_due) return false;
+              return new Date(s.next_due) < new Date();
+            });
+            // Гэрийн даалгаврын идэвхтэй тоо
+            const activeHwCount = (homeworks || []).filter(h =>
+              visibleClasses.some(c => c.id === h.class_id) &&
+              new Date(h.due_date) > new Date()
+            ).length;
+            return (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 8 }}>
+                {/* 1. ӨНӨӨДӨР - анги */}
+                <div style={{ background: "#f5f0ff", borderRadius: 12, padding: "10px 12px", borderLeft: "3px solid #7c3aed" }}>
+                  <div style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700, marginBottom: 2 }}>📚 ӨНӨӨДӨР</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>{todayClasses.length} анги</div>
+                  <div style={{ fontSize: 10, color: "#666", marginTop: 1 }}>
+                    {todayClasses.length > 0 ? todayClasses.map(c => c.name).join(", ").slice(0, 30) : "Хичээл байхгүй"}
+                  </div>
+                </div>
+
+                {/* 2. СУРАГЧ */}
+                <div style={{ background: "#e8f5e9", borderRadius: 12, padding: "10px 12px", borderLeft: "3px solid #2e7d32" }}>
+                  <div style={{ fontSize: 10, color: "#2e7d32", fontWeight: 700, marginBottom: 2 }}>👥 СУРАГЧ</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>{allStudents.length}</div>
+                  <div style={{ fontSize: 10, color: "#666", marginTop: 1 }}>{visibleClasses.length} ангид</div>
+                </div>
+
+                {/* 3. ХОЦОРСОН ТӨЛБӨР - clickable */}
+                <div onClick={() => overdueStudents.length > 0 && setShowOverdueDetail(true)}
+                  className="k-press"
+                  style={{
+                    background: overdueStudents.length > 0 ? "#ffebee" : "#f5f5f5",
+                    borderRadius: 12, padding: "10px 12px",
+                    borderLeft: `3px solid ${overdueStudents.length > 0 ? "#c62828" : "#aaa"}`,
+                    cursor: overdueStudents.length > 0 ? "pointer" : "default",
+                  }}>
+                  <div style={{ fontSize: 10, color: overdueStudents.length > 0 ? "#c62828" : "#888", fontWeight: 700, marginBottom: 2 }}>
+                    💰 ХОЦОРСОН
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>
+                    {overdueStudents.length} <span style={{ fontSize: 11, fontWeight: 600, opacity: .6 }}>сурагч</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: overdueStudents.length > 0 ? "#c62828" : "#888", marginTop: 1 }}>
+                    {overdueStudents.length > 0 ? "Дэлгэрэнгүй харах →" : "Бүгд төлсөн"}
+                  </div>
+                </div>
+
+                {/* 4. ДААЛГАВАР */}
+                <div style={{ background: "#fff3cd", borderRadius: 12, padding: "10px 12px", borderLeft: "3px solid #b8860b" }}>
+                  <div style={{ fontSize: 10, color: "#b8860b", fontWeight: 700, marginBottom: 2 }}>📝 ДААЛГАВАР</div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>{activeHwCount}</div>
+                  <div style={{ fontSize: 10, color: "#b8860b", marginTop: 1 }}>идэвхтэй</div>
+                </div>
               </div>
-            </div>
-            <div style={{ background: "#e8f5e9", borderRadius: 12, padding: "10px 12px", borderLeft: "3px solid #2e7d32" }}>
-              <div style={{ fontSize: 10, color: "#2e7d32", fontWeight: 700, marginBottom: 2 }}>👥 СУРАГЧ</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>{allStudents.length}</div>
-              <div style={{ fontSize: 10, color: "#666", marginTop: 1 }}>{visibleClasses.length} ангид</div>
-            </div>
-            {homeworks.length > 0 && (
-              <div style={{ background: "#fff3cd", borderRadius: 12, padding: "10px 12px", borderLeft: "3px solid #b8860b" }}>
-                <div style={{ fontSize: 10, color: "#b8860b", fontWeight: 700, marginBottom: 2 }}>📝 ДААЛГАВАР</div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: "#1a1a2e" }}>{homeworks.filter(h => visibleClasses.some(c => c.id === h.class_id)).length}</div>
-                <div style={{ fontSize: 10, color: "#b8860b", marginTop: 1 }}>идэвхтэй</div>
-              </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
 
         {/* Анги жагсаалт — Image 1 шиг Habit Tracker маяг */}
@@ -3489,6 +3991,61 @@ export default function App() {
             onClose={() => setShowAdmin(false)} onToast={showToast}
             onRefresh={() => loadAll(true)} />
         )}
+
+        {/* Хоцорсон төлбөртэй сурагчдын дэлгэрэнгүй */}
+        {showOverdueDetail && (() => {
+          const overdueList = allStudents.filter(s => {
+            if (!s.next_due) return false;
+            return new Date(s.next_due) < new Date();
+          }).map(s => {
+            const cls = classes.find(c => c.id === s.class_id);
+            const daysOverdue = Math.floor((Date.now() - new Date(s.next_due).getTime()) / (1000 * 60 * 60 * 24));
+            const dueAmount = Math.max(0, (s.total_fee || 0) - (s.total_paid || 0));
+            return { s, cls, daysOverdue, dueAmount };
+          }).sort((a, b) => b.daysOverdue - a.daysOverdue);
+          return (
+            <Overlay onClose={() => setShowOverdueDetail(false)} maxW={460}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ fontSize: 28 }}>💰</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: "#c62828" }}>Хоцорсон төлбөр</div>
+                  <div style={{ fontSize: 11, color: "#888" }}>{overdueList.length} сурагч</div>
+                </div>
+              </div>
+              <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+                {overdueList.map(({ s, cls, daysOverdue, dueAmount }) => {
+                  const t2 = getTheme(s.theme_id);
+                  return (
+                    <div key={s.id} onClick={() => { setShowOverdueDetail(false); setSelCls(s.class_id); setSelSid(s.id); }}
+                      className="k-press"
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: 12, marginBottom: 6, background: "#fff5f5", borderRadius: 12, border: "1px solid #ffcdd2", cursor: "pointer" }}>
+                      <div style={{ width: 40, height: 40, borderRadius: "50%", overflow: "hidden", background: t2.soft, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, border: `2px solid ${t2.accent}`, flexShrink: 0 }}>
+                        {s.photo_url ? <img src={s.photo_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : t2.emoji}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: "#1a1a2e", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</div>
+                        <div style={{ fontSize: 11, color: "#666", marginTop: 2 }}>
+                          <span style={{ background: cls?.color || "#888", color: "#fff", padding: "1px 6px", borderRadius: 6, fontSize: 10, fontWeight: 700 }}>{cls?.name || "—"}</span>
+                          <span style={{ marginLeft: 6, color: "#c62828", fontWeight: 700 }}>⏰ {daysOverdue} хоног хоцорсон</span>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 900, color: "#c62828" }}>{fmt(dueAmount)}₮</div>
+                        <div style={{ fontSize: 9, color: "#888", fontWeight: 600 }}>үлдсэн</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {overdueList.length === 0 && (
+                  <div style={{ textAlign: "center", padding: "30px 0", color: "#43a047" }}>
+                    <div style={{ fontSize: 40, marginBottom: 8 }}>✅</div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>Бүх сурагч төлбөрөө төлсөн!</div>
+                  </div>
+                )}
+              </div>
+            </Overlay>
+          );
+        })()}
 
         <Toast msg={toast?.msg} type={toast?.type} onDone={() => setToast(null)} />
       </div>
