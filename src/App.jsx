@@ -529,6 +529,220 @@ function AuthScreen({ onAuth }) {
 // ════════════════════════════════════════════════════════════════════
 
 // ── VocabTab (Үгсийн жагсаалт, дуудлага сонсох) ──────────────────
+// ════════════════════════════════════════════════════════════════════
+// VocabListView — Бүх үгсийг он сартай харах + Хэвлэх
+// ════════════════════════════════════════════════════════════════════
+
+function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) {
+  const [filter, setFilter] = useState("all"); // all | vocab | grammar
+  const [sortBy, setSortBy] = useState("date_desc"); // date_desc | date_asc
+
+  // Бүх үгсийг өдрөөр group хийх
+  const grouped = useMemo(() => {
+    let filtered = vocabEntries.filter(v => {
+      if (filter === "vocab") return v.type !== "grammar";
+      if (filter === "grammar") return v.type === "grammar";
+      return true;
+    });
+    // Group by date
+    const map = {};
+    filtered.forEach(v => {
+      const d = v.date || "Огноогүй";
+      if (!map[d]) map[d] = [];
+      map[d].push(v);
+    });
+    // Sort dates
+    const dates = Object.keys(map).sort();
+    if (sortBy === "date_desc") dates.reverse();
+    return dates.map(d => ({ date: d, items: map[d] }));
+  }, [vocabEntries, filter, sortBy]);
+
+  const totalVocab = vocabEntries.filter(v => v.type !== "grammar").length;
+  const totalGrammar = vocabEntries.filter(v => v.type === "grammar").length;
+
+  const wordStatus = (word) => {
+    const wk = weakWords.find(w => (typeof w === "string" ? w : w.word) === word);
+    if (!wk) return null;
+    if (typeof wk === "string") return { color: "#f57c00", label: "1 удаа алдсан" };
+    const cnt = wk.miss_count || 0;
+    if (cnt >= 2) return { color: "#e53935", label: `${cnt} удаа алдсан` };
+    if (cnt === 1) return { color: "#f57c00", label: "1 удаа алдсан" };
+    return null;
+  };
+
+  const handlePrint = () => {
+    const win = window.open("", "_blank");
+    if (!win) {
+      alert("Pop-up хаагдсан байна. Browser-ийн pop-up зөвшөөрөл өгнө үү");
+      return;
+    }
+    let html = `
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${className || "Үгсийн жагсаалт"}</title>
+<style>
+  @page { size: A4; margin: 1.5cm }
+  body { font-family: 'Arial', sans-serif; color: #1a1a2e; padding: 0; margin: 0 }
+  h1 { color: #7c3aed; text-align: center; border-bottom: 3px solid #7c3aed; padding-bottom: 8px; margin-top: 0; font-size: 22px }
+  .meta { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px }
+  .date-section { margin-bottom: 18px; page-break-inside: avoid }
+  .date-title { background: #f5f0ff; color: #7c3aed; padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: bold; margin-bottom: 8px; display: inline-block }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 6px }
+  th { background: #e3f2fd; padding: 6px 10px; text-align: left; font-size: 12px; border: 1px solid #b3d9ff }
+  td { padding: 6px 10px; border: 1px solid #e0e0e0; font-size: 13px }
+  td.kr { font-weight: bold; color: #1a1a2e; width: 30% }
+  td.mn { color: #555 }
+  td.type { width: 60px; text-align: center; font-size: 11px }
+  .type.g { color: #7c3aed; background: #f5f0ff; font-weight: bold }
+  .type.v { color: #b8860b; background: #fff8e1; font-weight: bold }
+  .footer { text-align: center; color: #999; font-size: 10px; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px }
+  @media print { .no-print { display: none } }
+</style>
+</head><body>
+<h1>📚 ${className || "Үгсийн жагсаалт"}</h1>
+<div class="meta">Нийт: ${totalVocab} үг · ${totalGrammar} дүрэм · ${new Date().toLocaleDateString("mn-MN")} хэвлэв</div>
+`;
+    grouped.forEach(g => {
+      html += `<div class="date-section">
+<div class="date-title">📅 ${g.date}</div>
+<table>
+<thead><tr><th class="type">Төрөл</th><th>Солонгос</th><th>Монгол</th></tr></thead>
+<tbody>`;
+      g.items.forEach(v => {
+        const isGr = v.type === "grammar";
+        html += `<tr>
+<td class="type ${isGr ? 'g' : 'v'}">${isGr ? '📖' : '📚'}</td>
+<td class="kr">${v.word || ""}</td>
+<td class="mn">${v.meaning || ""}</td>
+</tr>`;
+      });
+      html += `</tbody></table></div>`;
+    });
+    html += `<div class="footer">🌸 Кандун University Korean School</div>
+<script>window.onload = function() { window.print(); }</script>
+</body></html>`;
+    win.document.write(html);
+    win.document.close();
+  };
+
+  return (
+    <div className="k-fade" style={{ background: t.card, borderRadius: 18, padding: 14, border: `2px solid ${t.border}` }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: t.text }}>📚 Шинэ үгсийн жагсаалт</div>
+          <div style={{ fontSize: 11, color: t.text, opacity: .6, marginTop: 2 }}>
+            {totalVocab} үг · {totalGrammar} дүрэм
+          </div>
+        </div>
+        <button onClick={handlePrint} className="k-press"
+          style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 10, padding: "8px 14px", fontWeight: 800, fontSize: 12, cursor: "pointer", boxShadow: "0 3px 0 #0d47a1", display: "flex", alignItems: "center", gap: 5 }}>
+          🖨️ Хэвлэх
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 5, marginBottom: 10, background: t.soft, borderRadius: 10, padding: 3 }}>
+        {[["all", `📋 Бүгд (${vocabEntries.length})`], ["vocab", `📚 Үг (${totalVocab})`], ["grammar", `📖 Дүрэм (${totalGrammar})`]].map(([id, label]) => (
+          <button key={id} onClick={() => setFilter(id)} style={{
+            flex: 1, padding: "6px 4px", borderRadius: 8, border: "none",
+            background: filter === id ? "#fff" : "transparent",
+            color: filter === id ? t.accent : t.text,
+            fontWeight: filter === id ? 800 : 600, fontSize: 11, cursor: "pointer",
+            boxShadow: filter === id ? `0 1px 4px ${t.accent}33` : "none",
+          }}>{label}</button>
+        ))}
+      </div>
+
+      {/* Sort */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 11, background: "#fff", cursor: "pointer" }}>
+          <option value="date_desc">📅 Шинэ нь эхэнд</option>
+          <option value="date_asc">📅 Хуучин нь эхэнд</option>
+        </select>
+      </div>
+
+      {/* Color legend (зөвхөн weakWords байвал) */}
+      {weakWords.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 10, padding: 8, background: "#fff", borderRadius: 10, fontSize: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: "#66bb6a" }} />
+            <span>Сайн цээжилсэн</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: "#f57c00" }} />
+            <span>1 удаа алдсан</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: "#e53935" }} />
+            <span>Олон алдсан</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 3, background: "#bbb" }} />
+            <span>Бэлдээгүй</span>
+          </div>
+        </div>
+      )}
+
+      {/* Grouped list */}
+      {grouped.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "30px 0", color: t.text, opacity: .5 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>📭</div>
+          <div style={{ fontSize: 13, fontWeight: 700 }}>Үг байхгүй байна</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {grouped.map(g => (
+            <div key={g.date} style={{ background: "#fff", borderRadius: 12, padding: 10, border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: t.accent, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${t.soft}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>📅 {g.date}</span>
+                <span style={{ fontSize: 10, color: t.text, opacity: .6, fontWeight: 600 }}>{g.items.length} зүйл</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {g.items.map(v => {
+                  const status = wordStatus(v.word);
+                  const isGr = v.type === "grammar";
+                  // 4 өнгөтэй харагдах:
+                  // - status.color (улаан/шар) — алдсан бол
+                  // - ногоон — сайн цээжилсэн (status байхгүй ч weakWords-д бусад үг байгаа бол)
+                  // - саарал — огт бэлдээгүй (weakWords нь бараг хоосон)
+                  const hasAnyPractice = weakWords.length > 0;
+                  const wordColor = status ? status.color : (hasAnyPractice ? "#66bb6a" : "#bbb");
+                  return (
+                    <div key={v.id} onClick={() => speakKr(v.word)} className="k-press"
+                      style={{
+                        padding: "8px 10px", borderRadius: 8, cursor: "pointer",
+                        background: isGr ? "#f5f0ff" : "#fffdf5",
+                        border: `1px solid ${isGr ? "#d4b8ff" : "#ffe082"}`,
+                        borderLeft: `4px solid ${wordColor}`,
+                        display: "flex", alignItems: "center", gap: 8,
+                      }} title="🔊 Дуудлага сонсох">
+                      <div style={{ flexShrink: 0, width: 22, textAlign: "center" }}>
+                        {isGr ? "📖" : "📚"}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: 13, color: isGr ? "#7c3aed" : "#b8860b" }}>{v.word}</div>
+                        <div style={{ fontSize: 11, color: "#555", marginTop: 1 }}>{v.meaning}</div>
+                      </div>
+                      {status && (
+                        <div style={{ fontSize: 9, color: status.color, fontWeight: 700, background: "#fff", padding: "2px 6px", borderRadius: 6 }}>
+                          {status.label}
+                        </div>
+                      )}
+                      <span style={{ fontSize: 12, opacity: .4 }}>🔊</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function VocabTab({ vocabEntries, t }) {
   const vocabs = vocabEntries.filter(v => v.type !== "grammar");
   const grammars = vocabEntries.filter(v => v.type === "grammar");
@@ -2007,12 +2221,26 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
   const [showHint, setShowHint] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [lostItem, setLostItem] = useState(false);
+  const [selectedDate, setSelectedDate] = useState("all"); // "all" эсвэл "YYYY-MM-DD"
+  const [missedWords, setMissedWords] = useState([]); // алдсан үгсийн жагсаалт
+
+  // Бүх боломжит өдрүүд
+  const availableDates = useMemo(() => {
+    const all = [...(vocabs || []), ...(grammars || [])];
+    const dates = [...new Set(all.filter(v => v.date).map(v => v.date))].sort().reverse();
+    return dates;
+  }, [vocabs, grammars]);
 
   const allWords = useMemo(() => {
-    const v = (vocabs || []).filter(x => x.word && x.meaning);
-    const g = (grammars || []).filter(x => x.word && x.meaning);
+    let v = (vocabs || []).filter(x => x.word && x.meaning);
+    let g = (grammars || []).filter(x => x.word && x.meaning);
+    // Filter by selected date
+    if (selectedDate !== "all") {
+      v = v.filter(x => x.date === selectedDate);
+      g = g.filter(x => x.date === selectedDate);
+    }
     return [...v, ...g];
-  }, [vocabs, grammars]);
+  }, [vocabs, grammars, selectedDate]);
 
   const startExercise = (type) => {
     if (allWords.length < 1) return;
@@ -2043,6 +2271,7 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
   const submitAnswer = (answer, correct) => {
     const isRight = String(answer).trim().toLowerCase() === String(correct).trim().toLowerCase();
     setShowResult(isRight ? "correct" : "wrong");
+    const currentWord = items[currentIdx]?.target?.word;
     if (isRight) {
       setCorrectCount(c => c + 1);
       setStreak(s => { const ns = s + 1; setMaxStreak(m => Math.max(m, ns)); return ns; });
@@ -2050,6 +2279,10 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
     } else {
       setWrongCount(c => c + 1);
       setStreak(0); setLostItem(true);
+      // Алдсан үгийг хадгалах
+      if (currentWord) {
+        setMissedWords(prev => [...prev, currentWord]);
+      }
       try { if (navigator.vibrate) navigator.vibrate([30, 30, 30]); } catch (e) {}
       setTimeout(() => setLostItem(false), 1500);
     }
@@ -2066,7 +2299,8 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
     setStage("done");
     if (onComplete) {
       const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
-      onComplete({ score, correct: finalCorrect, total, exerciseType, elapsed, maxStreak });
+      // missedWords дамжуулна
+      onComplete({ score, correct: finalCorrect, total, exerciseType, elapsed, maxStreak, missedWords });
     }
   };
 
@@ -2096,6 +2330,37 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
           <div style={{ fontSize: 13, opacity: .95, marginTop: 3 }}>Ямар дасгалаар бэлдмээр байна?</div>
           <div style={{ fontSize: 11, opacity: .8, marginTop: 4 }}>📚 {allWords.length} үг бэлэн</div>
         </div>
+
+        {/* Өдөр сонгох tab */}
+        {availableDates.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: t.text, opacity: .7, fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>
+              📅 АЛЬ ӨДРИЙН ҮГИЙГ БЭЛДЭХ ВЭ?
+            </div>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", overflowX: "auto", paddingBottom: 4 }}>
+              <button onClick={() => setSelectedDate("all")} style={{
+                background: selectedDate === "all" ? t.accent : "#fff",
+                color: selectedDate === "all" ? "#fff" : t.text,
+                border: `2px solid ${selectedDate === "all" ? t.accent : t.border}`,
+                borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 800, cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}>📋 Бүгд</button>
+              {availableDates.map(d => {
+                const cnt = [...(vocabs || []), ...(grammars || [])].filter(v => v.date === d).length;
+                const isSel = selectedDate === d;
+                return (
+                  <button key={d} onClick={() => setSelectedDate(d)} style={{
+                    background: isSel ? t.accent : "#fff",
+                    color: isSel ? "#fff" : t.text,
+                    border: `2px solid ${isSel ? t.accent : t.border}`,
+                    borderRadius: 10, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}>{d.slice(5)} <span style={{ opacity: .7 }}>({cnt})</span></button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {allWords.length === 0 ? (
           <div style={{ background: t.card, borderRadius: 16, padding: 30, textAlign: "center", border: `2px dashed ${t.border}` }}>
@@ -2249,26 +2514,75 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
 
   return (
     <div className="k-fade">
-      {/* Photo + Name */}
-      <div style={{ background: t.card, borderRadius: 18, padding: 18, marginBottom: 12, border: `2px solid ${t.border}`, textAlign: "center" }}>
-        <div style={{ position: "relative", display: "inline-block", marginBottom: 10 }}>
-          <div style={{
-            width: 90, height: 90, borderRadius: "50%", overflow: "hidden",
-            background: t.soft, border: `4px solid ${t.accent}`,
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40,
-            margin: "0 auto", boxShadow: "0 4px 14px rgba(0,0,0,0.1)",
-          }}>
-            {s.photo_url ? <img src={s.photo_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : t.emoji}
-          </div>
-        </div>
-        <div style={{ fontWeight: 900, fontSize: 20, color: t.text, marginBottom: 4 }}>{s.name}</div>
-        <div style={{ fontSize: 12, color: t.accent, fontWeight: 700, marginBottom: 8 }}>{TOPIK[level]}</div>
+      {/* Photo + Name + Background plant */}
+      <div style={{
+        background: t.card, borderRadius: 18, padding: 18, marginBottom: 12,
+        border: `2px solid ${t.border}`, textAlign: "center",
+        position: "relative", overflow: "hidden",
+      }}>
+        {/* Ургамал — background */}
+        {(() => {
+          // Хэр өсөх вэ — completedHwCount + maxStreak + correctStreak-аас
+          const growth = Math.min(100, (completedHwCount * 8) + ((s.hw_streak || 0) * 3));
+          // 5 шат:
+          // 0-20%: бороого үр (seedling 🌱)
+          // 21-40%: жижиг ургамал 🌿
+          // 41-60%: дунд ургамал 🪴
+          // 61-80%: мод 🌳
+          // 81-100%: цэцэг 🌸 / том мод 🌲
+          let plantEmoji = "🌱", plantSize = 60;
+          if (growth >= 81) { plantEmoji = "🌳"; plantSize = 200; }
+          else if (growth >= 61) { plantEmoji = "🌲"; plantSize = 160; }
+          else if (growth >= 41) { plantEmoji = "🪴"; plantSize = 120; }
+          else if (growth >= 21) { plantEmoji = "🌿"; plantSize = 90; }
+          return (
+            <div style={{
+              position: "absolute", bottom: -10, right: -10,
+              fontSize: plantSize, opacity: 0.15,
+              pointerEvents: "none", lineHeight: 1,
+              transition: "all .6s ease",
+            }}>{plantEmoji}</div>
+          );
+        })()}
+        {/* Огторгуй */}
+        <div style={{ position: "absolute", top: 6, left: 8, fontSize: 16, opacity: 0.2 }}>☁️</div>
+        <div style={{ position: "absolute", top: 6, right: 8, fontSize: 16, opacity: 0.2 }}>✨</div>
 
-        {/* XP big */}
-        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: t.soft, borderRadius: 12, padding: "6px 14px", marginBottom: 4 }}>
-          <span style={{ fontSize: 20 }}>⚡</span>
-          <span style={{ fontWeight: 900, fontSize: 22, color: t.accent }}>{xp}</span>
-          <span style={{ fontSize: 11, color: t.text, opacity: .7, fontWeight: 700 }}>XP</span>
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{ position: "relative", display: "inline-block", marginBottom: 10 }}>
+            <div style={{
+              width: 90, height: 90, borderRadius: "50%", overflow: "hidden",
+              background: t.soft, border: `4px solid ${t.accent}`,
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40,
+              margin: "0 auto", boxShadow: "0 4px 14px rgba(0,0,0,0.1)",
+            }}>
+              {s.photo_url ? <img src={s.photo_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" /> : t.emoji}
+            </div>
+          </div>
+          <div style={{ fontWeight: 900, fontSize: 20, color: t.text, marginBottom: 4 }}>{s.name}</div>
+          <div style={{ fontSize: 12, color: t.accent, fontWeight: 700, marginBottom: 8 }}>{TOPIK[level]}</div>
+
+          {/* XP big */}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: t.soft, borderRadius: 12, padding: "6px 14px", marginBottom: 4 }}>
+            <span style={{ fontSize: 20 }}>⚡</span>
+            <span style={{ fontWeight: 900, fontSize: 22, color: t.accent }}>{xp}</span>
+            <span style={{ fontSize: 11, color: t.text, opacity: .7, fontWeight: 700 }}>XP</span>
+          </div>
+
+          {/* Plant growth indicator */}
+          {(completedHwCount > 0 || (s.hw_streak || 0) > 0) && (() => {
+            const growth = Math.min(100, (completedHwCount * 8) + ((s.hw_streak || 0) * 3));
+            let stageName = "🌱 Үр", nextStage = "🌿 Ургамал";
+            if (growth >= 81) { stageName = "🌳 Том мод"; nextStage = "Хамгийн дээд!"; }
+            else if (growth >= 61) { stageName = "🌲 Мод"; nextStage = "🌳 Том мод"; }
+            else if (growth >= 41) { stageName = "🪴 Цэцэг"; nextStage = "🌲 Мод"; }
+            else if (growth >= 21) { stageName = "🌿 Ургамал"; nextStage = "🪴 Цэцэг"; }
+            return (
+              <div style={{ marginTop: 10, padding: "6px 10px", background: t.soft, borderRadius: 10, fontSize: 10, color: t.text, fontWeight: 700 }}>
+                {stageName} · {growth}% {growth < 100 && <span style={{ opacity: .6 }}>→ {nextStage}</span>}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -2639,6 +2953,7 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
   const [showEditCls, setShowEditCls] = useState(false);
   const [showCopyVocabs, setShowCopyVocabs] = useState(false);
   const [selectedVocabIds, setSelectedVocabIds] = useState(new Set());
+  const [showVocabList, setShowVocabList] = useState(false);
   // Vocab add
   const [vocabDate, setVocabDate] = useState(TODAY);
   const [vocabType, setVocabType] = useState("vocab");
@@ -2761,6 +3076,7 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
             🏆 {activeExam ? "Идэвхтэй" : "Шалгалт"}
           </button>
           <button onClick={() => setShowVocab(v => !v)} style={btn("#fff3cd", "#b8860b", "#f9a825")}>{showVocab ? "✕" : "📚"}</button>
+          <button onClick={() => setShowVocabList(true)} style={btn("#e1f5fe", "#0288d1", "#81d4fa")}>📋 Жагсаалт</button>
           <button onClick={() => setShowAddSt(true)} style={btn(cls.color, "#fff")}>+ Сурагч</button>
           {isAdmin && <button onClick={() => setShowEditCls(true)} style={btn("#f0f4ff", "#1976d2", "#90caf9")}>⚙️</button>}
           {isSuperAdmin && <button onClick={() => setConfirmDelCls(true)} style={btn("#fff0f0", "#e53935", "#ffcdd2")}>🗑️</button>}
@@ -3064,6 +3380,14 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
           allClasses={[]} onClose={() => { setShowCopyVocabs(false); setSelectedVocabIds(new Set()); }}
           onCopied={() => { refreshAll && refreshAll(); setSelectedVocabIds(new Set()); }} onToast={onToast} />
       )}
+
+      {/* Бүх үгсийг харах + хэвлэх */}
+      {showVocabList && (
+        <Overlay onClose={() => setShowVocabList(false)} maxW={520}>
+          <VocabListView vocabEntries={classVocabs} t={{ accent: cls.color, text: "#1a1a2e", soft: cls.color + "22", card: "#fff", border: cls.color + "55" }}
+            className={cls.name} weakWords={[]} />
+        </Overlay>
+      )}
     </div>
   );
 }
@@ -3166,15 +3490,28 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
           grammars={vocabEntries.filter(v => v.type === "grammar")}
           t={t} level={s.level || 0} title="🌸 Хэлээ бэлдэх"
           onClose={() => setShowPractice(false)}
-          onComplete={async ({ correct }) => {
+          onComplete={async ({ correct, missedWords = [] }) => {
+            // Алдсан үгсийг weak_words-д нэмэх
+            const existing = s.weak_words || [];
+            const existingMap = {};
+            existing.forEach(w => {
+              const word = typeof w === "string" ? w : w.word;
+              existingMap[word] = typeof w === "string" ? { word, miss_count: 1 } : { ...w };
+            });
+            missedWords.forEach(w => {
+              if (existingMap[w]) existingMap[w].miss_count = (existingMap[w].miss_count || 0) + 1;
+              else existingMap[w] = { word: w, miss_count: 1 };
+            });
+            const newWeakWords = Object.values(existingMap);
+
             const xpAdd = Math.round((correct || 0) * 2);
-            if (xpAdd > 0) {
-              try {
-                const newXp = (s.xp || 0) + xpAdd;
-                await supaUpdate("students", s.id, { xp: newXp });
-                setStudents(prev => prev.map(x => x.id === s.id ? { ...x, xp: newXp } : x));
-              } catch (e) {}
-            }
+            const newXp = (s.xp || 0) + xpAdd;
+            try {
+              const updates = { weak_words: newWeakWords };
+              if (xpAdd > 0) updates.xp = newXp;
+              await supaUpdate("students", s.id, updates);
+              setStudents(prev => prev.map(x => x.id === s.id ? { ...x, ...updates } : x));
+            } catch (e) {}
           }} />
       </div>
     );
@@ -3302,6 +3639,11 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
                 action: () => setView("vocab"),
               },
               {
+                id: "vocablist", emoji: "📋", title: "Шинэ үгсийн жагсаалт",
+                sub: "Он сараар нь харах, хэвлэх", bg: "#e1f5fe", color: "#0288d1",
+                action: () => setView("vocablist"),
+              },
+              {
                 id: "leaderboard", emoji: "🏆", title: "Жагсаалт",
                 sub: `Ангийн ${classmates.length} сурагч`, bg: "#fff8e1", color: "#ffca28",
                 action: () => setView("leaderboard"),
@@ -3358,6 +3700,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
 
       {view === "daily" && <DailyCalendarTab vocabEntries={vocabEntries} t={t} classDays={classDays} classStartDate={classStartDate} classColor={classColor} />}
       {view === "vocab" && <VocabTab vocabEntries={vocabEntries} t={t} />}
+      {view === "vocablist" && <VocabListView vocabEntries={vocabEntries} t={t} className={s.name + "-ийн анги"} weakWords={s.weak_words || []} />}
       {view === "leaderboard" && (
         <div className="k-fade" style={{ background: t.card, borderRadius: 18, padding: 16, border: `2px solid ${t.border}` }}>
           <div style={{ fontWeight: 700, fontSize: 15, color: t.text, marginBottom: 14, textAlign: "center" }}>🏆 Ангийн жагсаалт</div>
