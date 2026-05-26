@@ -14,31 +14,75 @@ const supaHeaders = () => ({
   "Prefer": "return=representation",
 });
 
+// Timeout-той fetch (network алдаагаа илрүүлэх)
+async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+  const controller = new AbortController();
+  const tm = setTimeout(() => controller.abort(), timeout);
+  try {
+    const r = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(tm);
+    return r;
+  } catch (e) {
+    clearTimeout(tm);
+    throw e;
+  }
+}
+
+// Retry-тэй fetch — алдаа гарвал 3 удаа дахин оролдох
+async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+  let lastError;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const r = await fetchWithTimeout(url, options);
+      // 429 (rate limit) эсвэл 5xx алдаа гарвал — хүлээгээд дахин оролдох
+      if (r.status === 429 || (r.status >= 500 && r.status < 600)) {
+        if (attempt < maxRetries - 1) {
+          await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt))); // 500, 1000, 2000 ms
+          continue;
+        }
+      }
+      return r;
+    } catch (e) {
+      lastError = e;
+      if (attempt < maxRetries - 1) {
+        await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt)));
+      }
+    }
+  }
+  throw lastError || new Error("Network error");
+}
+
 async function supaSelect(table, query = "select=*") {
   try {
-    const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, {
+    const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?${query}`, {
       headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
     });
-    if (!r.ok) return [];
+    if (!r.ok) {
+      console.warn(`Supabase ${table}: ${r.status}`);
+      return [];
+    }
     return await r.json();
-  } catch (e) { return []; }
+  } catch (e) {
+    console.warn(`Supabase ${table} error:`, e.message);
+    return [];
+  }
 }
 async function supaInsert(table, body) {
-  const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+  const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}`, {
     method: "POST", headers: supaHeaders(), body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await r.text());
   return await r.json();
 }
 async function supaUpdate(table, id, body) {
-  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
+  const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
     method: "PATCH", headers: supaHeaders(), body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await r.text());
   return r;
 }
 async function supaDelete(table, id) {
-  await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
+  await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
     method: "DELETE", headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
   });
 }
@@ -68,14 +112,54 @@ function getSessions(days, ym) {
 }
 
 // Solongos audio (Web Speech API)
+// Voice кэш — нэг удаа л voice list ачаалж сонгоно
+let _krVoice = null;
+let _voicesReady = false;
+
+function pickBestKrVoice() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) return null;
+  // Эрэмбэлэх — Google, Apple премиум хоолойнуудыг урьтал
+  const kr = voices.filter(v => v.lang === "ko-KR" || v.lang.startsWith("ko"));
+  if (kr.length === 0) return null;
+  // 1. Google Korean (хамгийн чанартай)
+  let best = kr.find(v => /Google/i.test(v.name) && /Korean|한국/i.test(v.name));
+  if (best) return best;
+  // 2. Apple Premium / Enhanced
+  best = kr.find(v => /Premium|Enhanced|Yuna|Sora/i.test(v.name));
+  if (best) return best;
+  // 3. Microsoft Natural (Edge)
+  best = kr.find(v => /Natural|Neural|InJoon|SunHi/i.test(v.name));
+  if (best) return best;
+  // 4. Эмэгтэй хоолой давуу
+  best = kr.find(v => /female|Yuna|Sora|Heami|Sun-Hi/i.test(v.name));
+  if (best) return best;
+  // 5. Default
+  return kr[0];
+}
+
 function speakKr(text) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "ko-KR"; u.rate = 0.85;
+    u.lang = "ko-KR";
+    u.rate = 0.92;     // Жижигхэн удаан
+    u.pitch = 1.05;    // Бага зэрэг өндөр (эмэгтэй хоолойтой ойролцоо)
+    u.volume = 1.0;
+    if (!_krVoice) _krVoice = pickBestKrVoice();
+    if (_krVoice) u.voice = _krVoice;
     window.speechSynthesis.speak(u);
   } catch (e) {}
+}
+
+// Voice list бэлэн болоход дахин сонгоно
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  const setVoice = () => { _krVoice = pickBestKrVoice(); _voicesReady = true; };
+  window.speechSynthesis.onvoiceschanged = setVoice;
+  setTimeout(setVoice, 100);
+  setTimeout(setVoice, 1000);
 }
 
 // ── GEMINI AI ─────────────────────────────────────────────────────────
@@ -161,6 +245,102 @@ function generateFallbackQuestions(vocabs, count) {
       correct: target.meaning,
     };
   });
+}
+
+// ── Үгэнд тохирох emoji автомат сонгох (offline keyword-based) ──────
+const EMOJI_MAP = {
+  // Хүн, гэр бүл
+  "найз": "👫", "анд": "👫", "эх": "👩", "эцэг": "👨", "аав": "👨", "ээж": "👩",
+  "хүүхэд": "👶", "хүү": "👦", "охин": "👧", "ах": "👦", "эгч": "👧", "дүү": "👶",
+  "багш": "👩‍🏫", "оюутан": "🧑‍🎓", "сурагч": "🧑‍🎓", "эмч": "👨‍⚕️", "хүн": "🧑",
+  // Хоол
+  "хоол": "🍽️", "будаа": "🍚", "талх": "🍞", "ус": "💧", "сүү": "🥛", "цай": "🍵",
+  "кофе": "☕", "жимс": "🍎", "алим": "🍎", "банан": "🍌", "лимон": "🍋", "өндөг": "🥚",
+  "мах": "🥩", "загас": "🐟", "хүнс": "🍱", "амтат": "🍰", "чихэр": "🍬",
+  // Газар
+  "сургууль": "🏫", "гэр": "🏠", "байшин": "🏠", "эмнэлэг": "🏥", "дэлгүүр": "🏪",
+  "хот": "🏙️", "хөдөө": "🌾", "уул": "⛰️", "гол": "🌊", "тэнгис": "🌊", "далай": "🌊",
+  "ой": "🌲", "цэцэрлэг": "🌷", "талбай": "🏞️", "зам": "🛣️", "гудамж": "🛣️",
+  // Цаг
+  "өдөр": "☀️", "шөнө": "🌙", "өглөө": "🌅", "орой": "🌆", "цаг": "🕐",
+  "өчигдөр": "📅", "өнөөдөр": "📅", "маргааш": "📅", "долоо хоног": "📅",
+  "сар": "📅", "жил": "📅", "хавар": "🌸", "зун": "☀️", "намар": "🍂", "өвөл": "❄️",
+  // Юм
+  "ном": "📚", "дэвтэр": "📓", "үзэг": "✏️", "харандаа": "✏️", "сонин": "📰",
+  "утас": "📱", "компьютер": "💻", "машин": "🚗", "автобус": "🚌", "галт тэрэг": "🚆",
+  "онгоц": "✈️", "усан онгоц": "🚢", "дугуй": "🚲",
+  // Амьтан
+  "нохой": "🐕", "муур": "🐈", "морь": "🐎", "үхэр": "🐄", "хонь": "🐑", "гахай": "🐖",
+  "тахиа": "🐔", "шувуу": "🐦", "загас": "🐠", "мэнгэ": "🐭",
+  // Үйл
+  "явах": "🚶", "ирэх": "🚶", "идэх": "🍴", "ууx": "🥤", "унтах": "😴", "босох": "🌅",
+  "хичээх": "💪", "сурах": "📖", "уншиx": "📖", "бичих": "✏️", "ярих": "💬", "сонсох": "👂",
+  "харах": "👀", "хийх": "👷", "ажил": "💼", "ажиллах": "💼", "тоглох": "🎮", "дуулах": "🎤",
+  "хайрлах": "❤️", "баярлах": "😊", "уйлах": "😢", "инээх": "😄", "уурлах": "😠",
+  // Шинж тэмдэг
+  "том": "📏", "жижиг": "📏", "сайн": "👍", "муу": "👎", "хурдан": "⚡", "удаан": "🐢",
+  "халуун": "🔥", "хүйтэн": "❄️", "шинэ": "✨", "хуучин": "📜", "хол": "🌐", "ойр": "📍",
+  // Өнгө
+  "улаан": "🔴", "цэнхэр": "🔵", "ногоон": "🟢", "шар": "🟡", "хар": "⚫", "цагаан": "⚪",
+  "ягаан": "🌸", "нил": "🟣", "хүрэн": "🟤",
+  // Бусад
+  "мөнгө": "💰", "ажил": "💼", "цэцэг": "🌸", "мод": "🌳", "од": "⭐", "наран": "☀️",
+  "сар": "🌙", "тэнгэр": "🌌", "үүл": "☁️", "бороо": "🌧️", "цас": "❄️", "салхи": "💨",
+  // Грамматика
+  "болохгүй": "🚫", "болно": "✅", "хэрэгтэй": "❗", "хэрэггүй": "🚫",
+};
+
+function getEmojiForWord(word, meaning) {
+  if (!word && !meaning) return "📝";
+  const text = (meaning || "").toLowerCase().trim();
+  // Хайх — шууд таарах
+  if (EMOJI_MAP[text]) return EMOJI_MAP[text];
+  // Хэсэгчилэн таарах (хоёр үг хайх)
+  for (const [key, emoji] of Object.entries(EMOJI_MAP)) {
+    if (text.includes(key)) return emoji;
+  }
+  return "📝";
+}
+
+// AI-аар тохирох emoji олох (cache хийнэ)
+const _emojiCache = {};
+async function getEmojiByAI(word, meaning) {
+  // Эхлээд offline хайя
+  const offlineEmoji = getEmojiForWord(word, meaning);
+  if (offlineEmoji !== "📝") return offlineEmoji;
+  // Cache шалгах
+  const key = `${word}|${meaning}`;
+  if (_emojiCache[key]) return _emojiCache[key];
+  if (!GEMINI_API_KEY) return "📝";
+  try {
+    const text = await geminiCall(
+      `"${word}" (${meaning}) гэдэг үгэнд хамгийн ойролцоо EMOJI 1 ширхэгийг буцаа. ЗӨВХӨН emoji буцаа, өөр текст бичихгүй. Жишээ: "сургууль" → 🏫`,
+      { system: "Та зөвхөн нэг emoji буцаана. Текст бичихгүй." }
+    );
+    const emoji = (text || "").trim().match(/\p{Emoji}/u)?.[0] || "📝";
+    _emojiCache[key] = emoji;
+    return emoji;
+  } catch (e) { return "📝"; }
+}
+
+// AI-аар өгүүлбэр үүсгэх (cache)
+const _sentenceCache = {};
+async function generateSentence(word, meaning, level = 0) {
+  const key = `${word}|${meaning}|${level}`;
+  if (_sentenceCache[key]) return _sentenceCache[key];
+  if (!GEMINI_API_KEY) return null;
+  try {
+    const lvlName = TOPIK[level] || "TOPIK I-1";
+    const text = await geminiCall(
+      `${lvlName} түвшний сурагчдад зориулсан, "${word}" (${meaning}) үг орсон ОЙЛГОМЖТОЙ нэг солонгос өгүүлбэр + монгол орчуулга буцаа.
+Формат (өөр текст бичихгүй, заавал JSON):
+{"kr": "Энэ нь ${word} юм.", "mn": "Энэ нь ${meaning} юм."}`,
+      { system: "Зөвхөн JSON формат буцаана.", json: true }
+    );
+    const data = JSON.parse(text);
+    _sentenceCache[key] = data;
+    return data;
+  } catch (e) { return null; }
 }
 
 // ── ТЕМ (Themes) ─────────────────────────────────────────────────────
@@ -355,6 +535,7 @@ function AuthScreen({ onAuth }) {
   const [regName, setRegName] = useState("");
   const [regPhone, setRegPhone] = useState("");
   const [regRd, setRegRd] = useState("");
+  const [regEmail, setRegEmail] = useState("");
   const [regPass, setRegPass] = useState("");
   const [classes, setClasses] = useState([]);
   const [regClassId, setRegClassId] = useState("");
@@ -393,15 +574,36 @@ function AuthScreen({ onAuth }) {
   };
 
   const doRegister = async () => {
-    if (!regName.trim() || !regClassId || regPass.length < 6) {
+    if (!regName.trim() || !regEmail.trim() || !regClassId || regPass.length < 6) {
       setErr("Бүх талбарыг бөглөнө үү (нууц үг 6+ тэмдэгт)");
+      return;
+    }
+    // И-мэйл format шалгах
+    const emailTrim = regEmail.trim().toLowerCase();
+    if (!emailTrim.includes("@") || !emailTrim.includes(".")) {
+      setErr("И-мэйл хаяг буруу байна");
       return;
     }
     setBusy(true); setErr("");
     try {
+      // Давхар email шалгах (students + pending)
+      const [existingSts, existingPends] = await Promise.all([
+        supaSelect("students", `select=id&email=eq.${encodeURIComponent(emailTrim)}`),
+        supaSelect("pending_students", `select=id&email=eq.${encodeURIComponent(emailTrim)}`),
+      ]);
+      if (existingSts && existingSts.length > 0) {
+        setErr("⚠️ Энэ и-мэйлээр аль хэдийн бүртгэлтэй байна");
+        setBusy(false); return;
+      }
+      if (existingPends && existingPends.length > 0) {
+        setErr("⚠️ Хүсэлт өмнө илгээсэн байна. Багш зөвшөөрөхийг хүлээ.");
+        setBusy(false); return;
+      }
+      // Хүсэлт оруулах
       await supaInsert("pending_students", {
-        id: `p${Date.now()}`,
+        id: `p${Date.now()}${Math.random().toString(36).slice(2, 5)}`,
         name: regName.trim(),
+        email: emailTrim,
         phone: regPhone.trim() || null,
         rd: regRd.trim() || null,
         password: regPass,
@@ -409,7 +611,8 @@ function AuthScreen({ onAuth }) {
         created_at: new Date().toISOString(),
       });
       setMode("student");
-      setEmail(""); setPass("");
+      setEmail(emailTrim); setPass("");
+      setRegName(""); setRegEmail(""); setRegPhone(""); setRegRd(""); setRegPass("");
       setErr("✅ Хүсэлт илгээсэн! Багш зөвшөөрсний дараа нэвтэрнэ.");
     } catch (e) { setErr("Алдаа гарлаа: " + e.message); }
     setBusy(false);
@@ -492,6 +695,7 @@ function AuthScreen({ onAuth }) {
         ) : (
           <>
             <input placeholder="Овог нэр" value={regName} onChange={e => setRegName(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
+            <input type="email" placeholder="И-мэйл хаяг (нэвтрэхэд хэрэглэнэ)" value={regEmail} onChange={e => setRegEmail(e.target.value)} style={{ ...INP, marginBottom: 8 }} autoComplete="email" />
             <input placeholder="Утас" value={regPhone} onChange={e => setRegPhone(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
             <input placeholder="Регистр" value={regRd} onChange={e => setRegRd(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
             <select value={regClassId} onChange={e => setRegClassId(e.target.value)} style={{ ...INP, marginBottom: 8, cursor: "pointer" }}>
@@ -1185,7 +1389,7 @@ function ChangePasswordModal({ onClose, teacherId, studentId, onToast }) {
 }
 
 // ── AdminPanel (Сүпэр админд — pending students, teachers) ──────
-function AdminPanel({ students, setStudents, currentTeacherId, onClose, onToast, onRefresh }) {
+function AdminPanel({ students, setStudents, currentTeacherId, onClose, onToast, onRefresh, classes = [] }) {
   const [tab, setTab] = useState("pending");
   const [pending, setPending] = useState([]);
   const [teachers, setTeachers] = useState([]);
@@ -1240,19 +1444,23 @@ function AdminPanel({ students, setStudents, currentTeacherId, onClose, onToast,
               <div style={{ fontSize: 40, opacity: .4, marginBottom: 8 }}>📭</div>
               Хүлээгдэж буй хүсэлт байхгүй
             </div>
-          ) : pending.map(p => (
-            <div key={p.id} style={{ background: "#fff8e1", borderRadius: 12, padding: 12, marginBottom: 8, border: "1px solid #ffe082" }}>
-              <div style={{ fontWeight: 800, fontSize: 14, color: "#b8860b", marginBottom: 4 }}>{p.name}</div>
-              <div style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
-                📞 {p.phone || "—"} · 🆔 {p.rd || "—"}<br />
-                Анги ID: {p.class_id}
+          ) : pending.map(p => {
+            const cls = (typeof classes !== "undefined" && classes.find) ? classes.find(c => c.id === p.class_id) : null;
+            return (
+              <div key={p.id} style={{ background: "#fff8e1", borderRadius: 12, padding: 12, marginBottom: 8, border: "1px solid #ffe082" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#b8860b", marginBottom: 4 }}>{p.name}</div>
+                <div style={{ fontSize: 11, color: "#666", marginBottom: 8 }}>
+                  📧 {p.email || "—"}<br />
+                  📞 {p.phone || "—"} · 🆔 {p.rd || "—"}<br />
+                  📚 Анги: {cls?.name || p.class_id}
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => approvePending(p)} style={{ ...btn("#43a047", "#fff"), flex: 1, justifyContent: "center" }}>✅ Зөвшөөрөх</button>
+                  <button onClick={() => rejectPending(p)} style={btn("#fff", "#c62828", "#ffcdd2")}>✕</button>
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => approvePending(p)} style={{ ...btn("#43a047", "#fff"), flex: 1, justifyContent: "center" }}>✅ Зөвшөөрөх</button>
-                <button onClick={() => rejectPending(p)} style={btn("#fff", "#c62828", "#ffcdd2")}>✕</button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
         {tab === "teachers" && teachers.map(t => (
           <div key={t.id} style={{ background: "#f5f0ff", borderRadius: 12, padding: 12, marginBottom: 8, border: "1px solid #d4b8ff" }}>
@@ -2206,7 +2414,110 @@ function ListeningExercise({ current, t, userAnswer, setUserAnswer, showResult, 
   );
 }
 
-// ── Main PracticeStudio ─────────────────────────────────────
+// ── SentenceExercise — Үгийг өгүүлбэрт оруулж бэлдэх ─────────────
+function SentenceExercise({ current, t, showResult, onSubmit }) {
+  const [sentence, setSentence] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    setLoading(true); setShowAnswer(false); setSelected(null);
+    generateSentence(current.target.word, current.target.meaning, current.level || 0)
+      .then(data => {
+        if (data && data.kr && data.mn) {
+          setSentence(data);
+        } else {
+          // Fallback — энгийн жишээ
+          setSentence({
+            kr: `이것은 ${current.target.word}입니다.`,
+            mn: `Энэ нь ${current.target.meaning} юм.`,
+          });
+        }
+        setLoading(false);
+      });
+    // Audio play
+    const tm = setTimeout(() => speakKr(current.target.word), 400);
+    return () => clearTimeout(tm);
+  }, [current]);
+
+  // Highlight target word in sentence
+  const highlightWord = (text, word) => {
+    if (!text || !word) return text;
+    const parts = text.split(word);
+    return parts.map((part, i) => (
+      <span key={i}>
+        {part}
+        {i < parts.length - 1 && (
+          <span style={{
+            background: "#fff3cd", color: "#b8860b", padding: "1px 6px",
+            borderRadius: 6, fontWeight: 900, border: "1px solid #ffc107",
+          }}>{word}</span>
+        )}
+      </span>
+    ));
+  };
+
+  if (loading) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 18, padding: "40px 20px", textAlign: "center", border: `2px solid ${t.border}` }}>
+        <div className="k-bounce" style={{ fontSize: 36, marginBottom: 8 }}>✍️</div>
+        <div style={{ fontSize: 13, color: t.text, opacity: .7 }}>Өгүүлбэр бэлдэж байна...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div key={current.target.word}>
+      {/* Target word card */}
+      <div style={{ background: "#fff", borderRadius: 18, padding: "20px 16px", textAlign: "center", marginBottom: 12, border: `2px solid ${t.border}` }}>
+        <div style={{ fontSize: 11, opacity: .6, fontWeight: 700, marginBottom: 6 }}>ШИНЭ ҮГ</div>
+        <div style={{ fontSize: 32, fontWeight: 900, color: t.text, marginBottom: 4 }}>{current.target.word}</div>
+        <div style={{ fontSize: 13, color: t.text, opacity: .65 }}>{current.target.meaning}</div>
+        <button onClick={() => speakKr(current.target.word)}
+          style={{ marginTop: 8, background: t.soft, color: t.accent, border: "none", borderRadius: 10, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+          🔊 Сонсох
+        </button>
+      </div>
+
+      {/* Sentence card */}
+      <div style={{ background: `linear-gradient(135deg,${t.soft},#fff)`, borderRadius: 18, padding: 16, marginBottom: 12, border: `2px solid ${t.border}` }}>
+        <div style={{ fontSize: 11, color: t.accent, fontWeight: 800, marginBottom: 8, letterSpacing: 1 }}>✍️ ӨГҮҮЛБЭР</div>
+        <div onClick={() => speakKr(sentence.kr)} style={{ cursor: "pointer", marginBottom: 10 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.6 }}>
+            {highlightWord(sentence.kr, current.target.word)}
+          </div>
+          <div style={{ fontSize: 10, color: t.accent, opacity: .6, marginTop: 4 }}>👆 Дарж сонсох</div>
+        </div>
+        {showAnswer && (
+          <div className="k-fade" style={{ borderTop: `1px solid ${t.border}`, paddingTop: 10, fontSize: 14, color: "#555", lineHeight: 1.5 }}>
+            <span style={{ fontSize: 10, color: t.accent, fontWeight: 700 }}>📝 ОРЧУУЛГА:</span>
+            <div style={{ marginTop: 4 }}>{sentence.mn}</div>
+          </div>
+        )}
+      </div>
+
+      {/* Buttons */}
+      {!showAnswer ? (
+        <button onClick={() => setShowAnswer(true)}
+          style={{ width: "100%", padding: 12, borderRadius: 14, border: "none", background: t.soft, color: t.accent, fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 8 }}>
+          💡 Орчуулга харах
+        </button>
+      ) : null}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={() => onSubmit(false)}
+          style={{ flex: 1, background: "#ffcdd2", color: "#c62828", border: "none", borderRadius: 14, padding: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", boxShadow: "0 3px 0 #ef9a9a" }}>
+          😅 Ойлгохгүй
+        </button>
+        <button onClick={() => onSubmit(true)}
+          style={{ flex: 1, background: "#c8e6c9", color: "#2e7d32", border: "none", borderRadius: 14, padding: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", boxShadow: "0 3px 0 #a5d6a7" }}>
+          ✅ Ойлгож байна
+        </button>
+      </div>
+    </div>
+  );
+}
 function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title }) {
   const [stage, setStage] = useState("menu");
   const [exerciseType, setExerciseType] = useState(null);
@@ -2671,26 +2982,52 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
         </div>
       )}
 
-      {/* Personal info */}
-      <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
-        <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📋 Мэдээлэл</div>
-        <div style={{ display: "grid", gap: 6, fontSize: 12, color: t.text }}>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ opacity: .6 }}>📞 Утас:</span>
-            <span style={{ fontWeight: 700 }}>{s.phone || "—"}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ opacity: .6 }}>📧 И-мэйл:</span>
-            <span style={{ fontWeight: 700, fontSize: 11 }}>{s.email || "—"}</span>
-          </div>
-          {s.enroll_date && (
+      {/* Personal info — зөвхөн сүпэр-админ + сурагч өөрөө харна */}
+      {(isSuperAdmin || (!isAdmin)) && (
+        <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📋 Мэдээлэл</div>
+          <div style={{ display: "grid", gap: 6, fontSize: 12, color: t.text }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ opacity: .6 }}>📅 Бүртгүүлсэн:</span>
-              <span style={{ fontWeight: 700 }}>{fmtDate(s.enroll_date)} ({daysEnrolled} өдөр)</span>
+              <span style={{ opacity: .6 }}>📞 Утас:</span>
+              <span style={{ fontWeight: 700 }}>{s.phone || "—"}</span>
             </div>
-          )}
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ opacity: .6 }}>📧 И-мэйл:</span>
+              <span style={{ fontWeight: 700, fontSize: 11 }}>{s.email || "—"}</span>
+            </div>
+            {isSuperAdmin && s.rd && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>🆔 Регистр:</span>
+                <span style={{ fontWeight: 700, fontSize: 11 }}>{s.rd}</span>
+              </div>
+            )}
+            {s.enroll_date && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>📅 Бүртгүүлсэн:</span>
+                <span style={{ fontWeight: 700 }}>{fmtDate(s.enroll_date)} ({daysEnrolled} өдөр)</span>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Энгийн багшид: зөвхөн нэр, түвшин, ангид байгаа эсэх */}
+      {isAdmin && !isSuperAdmin && (
+        <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📋 Мэдээлэл</div>
+          <div style={{ display: "grid", gap: 6, fontSize: 12, color: t.text }}>
+            {s.enroll_date && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>📅 Бүртгүүлсэн:</span>
+                <span style={{ fontWeight: 700 }}>{fmtDate(s.enroll_date)} ({daysEnrolled} өдөр)</span>
+              </div>
+            )}
+            <div style={{ fontSize: 10, opacity: .5, fontStyle: "italic", marginTop: 4 }}>
+              🔒 Утас, и-мэйл, РД зөвхөн сүпэр админд харагдана
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment info — бүх хэрэглэгчид харуулна */}
       {((s.total_fee || 0) > 0 || s.next_due) && (
@@ -3490,7 +3827,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
           grammars={vocabEntries.filter(v => v.type === "grammar")}
           t={t} level={s.level || 0} title="🌸 Хэлээ бэлдэх"
           onClose={() => setShowPractice(false)}
-          onComplete={async ({ correct, missedWords = [] }) => {
+          onComplete={async ({ correct, missedWords = [], elapsed = 0 }) => {
             // Алдсан үгсийг weak_words-д нэмэх
             const existing = s.weak_words || [];
             const existingMap = {};
@@ -3504,13 +3841,22 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
             });
             const newWeakWords = Object.values(existingMap);
 
-            const xpAdd = Math.round((correct || 0) * 2);
-            const newXp = (s.xp || 0) + xpAdd;
+            // XP — зөвхөн 10 минут БОДИТ бэлдсэн үед +5 XP
+            // (Жишээ нь даалгаврын XP 30 байдаг, 10 минут чанартай хичээлд 5 нь хангалттай)
+            // Худлаа click хийгээд XP авах боломжгүй болгох
+            const minutes = Math.floor(elapsed / 60);
+            const xpAdd = Math.floor(minutes / 10) * 5;  // 10 минут тутамд 5 XP
+
             try {
               const updates = { weak_words: newWeakWords };
-              if (xpAdd > 0) updates.xp = newXp;
+              if (xpAdd > 0) {
+                updates.xp = (s.xp || 0) + xpAdd;
+              }
               await supaUpdate("students", s.id, updates);
               setStudents(prev => prev.map(x => x.id === s.id ? { ...x, ...updates } : x));
+              if (xpAdd > 0) {
+                onToast && onToast(`🌟 ${minutes} минут бэлдсэн! +${xpAdd} XP`, "success");
+              }
             } catch (e) {}
           }} />
       </div>
@@ -3634,13 +3980,8 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
                 action: () => setView("daily"),
               },
               {
-                id: "vocab", emoji: "📚", title: "Үгсийн сан",
-                sub: vocabSummary, bg: "#fff3e0", color: "#ffa726",
-                action: () => setView("vocab"),
-              },
-              {
                 id: "vocablist", emoji: "📋", title: "Шинэ үгсийн жагсаалт",
-                sub: "Он сараар нь харах, хэвлэх", bg: "#e1f5fe", color: "#0288d1",
+                sub: vocabSummary, bg: "#e1f5fe", color: "#0288d1",
                 action: () => setView("vocablist"),
               },
               {
@@ -3801,15 +4142,225 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
 // ════════════════════════════════════════════════════════════════════
 
 // ── Багш сурагч харах AdminStudentDetail ──────────────────────
+// ── AllVocabsManager — Багш/Сүпэр-Админд: бүх анги, бүх үг, copy/print ──
+function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast }) {
+  const [selClsId, setSelClsId] = useState("all");
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [showCopyTo, setShowCopyTo] = useState(false);
+  const [copyTargetCls, setCopyTargetCls] = useState("");
+  const [copyTargetDate, setCopyTargetDate] = useState(TODAY);
+  const [copying, setCopying] = useState(false);
+
+  const filtered = useMemo(() => {
+    if (selClsId === "all") return vocabEntries;
+    return vocabEntries.filter(v => v.class_id === selClsId);
+  }, [vocabEntries, selClsId]);
+
+  // Group by date
+  const grouped = useMemo(() => {
+    const map = {};
+    filtered.forEach(v => {
+      const d = v.date || "Огноогүй";
+      if (!map[d]) map[d] = [];
+      map[d].push(v);
+    });
+    return Object.keys(map).sort().reverse().map(d => ({ date: d, items: map[d] }));
+  }, [filtered]);
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filtered.map(v => v.id)));
+  };
+
+  const doCopy = async () => {
+    if (!copyTargetCls) { onToast && onToast("❌ Анги сонгоно уу", "error"); return; }
+    if (selectedIds.size === 0) { onToast && onToast("❌ Үг сонгоно уу", "error"); return; }
+    setCopying(true);
+    try {
+      const toCopy = filtered.filter(v => selectedIds.has(v.id));
+      const inserts = toCopy.map(v => ({
+        id: `v${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+        class_id: copyTargetCls, word: v.word, meaning: v.meaning,
+        type: v.type || "vocab", date: copyTargetDate,
+      }));
+      await Promise.all(inserts.map(item => supaInsert("vocab_entries", item)));
+      const cls = classes.find(c => c.id === copyTargetCls);
+      onToast && onToast(`✅ ${toCopy.length} үг "${cls?.name || "—"}"-руу хуулагдлаа`, "success");
+      setSelectedIds(new Set());
+      setShowCopyTo(false);
+      onChanged && onChanged();
+    } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+    setCopying(false);
+  };
+
+  const handlePrint = () => {
+    const win = window.open("", "_blank");
+    if (!win) return;
+    const clsName = selClsId === "all" ? "Бүх анги" : classes.find(c => c.id === selClsId)?.name || "—";
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Үгсийн жагсаалт</title>
+<style>
+@page { size: A4; margin: 1.5cm }
+body { font-family: Arial; padding: 0 }
+h1 { color: #7c3aed; text-align: center; border-bottom: 3px solid #7c3aed; padding-bottom: 8px; font-size: 22px }
+.meta { text-align: center; color: #666; font-size: 12px; margin-bottom: 20px }
+.date-section { margin-bottom: 18px; page-break-inside: avoid }
+.date-title { background: #f5f0ff; color: #7c3aed; padding: 6px 12px; border-radius: 6px; font-size: 14px; font-weight: bold; margin-bottom: 8px; display: inline-block }
+table { width: 100%; border-collapse: collapse }
+th { background: #e3f2fd; padding: 6px 10px; text-align: left; font-size: 12px; border: 1px solid #b3d9ff }
+td { padding: 6px 10px; border: 1px solid #e0e0e0; font-size: 13px }
+td.kr { font-weight: bold; width: 30% }
+td.type { width: 60px; text-align: center; font-size: 11px }
+</style></head><body>
+<h1>📚 ${clsName}</h1>
+<div class="meta">Нийт: ${filtered.length} үг/дүрэм · ${new Date().toLocaleDateString("mn-MN")}</div>`;
+    grouped.forEach(g => {
+      html += `<div class="date-section"><div class="date-title">📅 ${g.date}</div>
+<table><thead><tr><th class="type">Төрөл</th><th>Солонгос</th><th>Монгол</th></tr></thead><tbody>`;
+      g.items.forEach(v => {
+        const isGr = v.type === "grammar";
+        html += `<tr><td class="type">${isGr ? '📖' : '📚'}</td><td class="kr">${v.word || ""}</td><td>${v.meaning || ""}</td></tr>`;
+      });
+      html += `</tbody></table></div>`;
+    });
+    html += `<script>window.onload=()=>window.print()</script></body></html>`;
+    win.document.write(html); win.document.close();
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16, color: "#1a1a2e" }}>📋 Шинэ үгсийн жагсаалт</div>
+          <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{filtered.length} үг/дүрэм</div>
+        </div>
+        <button onClick={handlePrint} style={{ ...btn("#1976d2", "#fff"), boxShadow: "0 3px 0 #0d47a1" }}>🖨️ Хэвлэх</button>
+      </div>
+
+      {/* Анги сонгох */}
+      <div style={{ marginBottom: 10 }}>
+        <select value={selClsId} onChange={e => { setSelClsId(e.target.value); setSelectedIds(new Set()); }}
+          style={{ ...INP, cursor: "pointer", fontWeight: 600 }}>
+          <option value="all">🏫 Бүх анги ({vocabEntries.length})</option>
+          {classes.map(c => {
+            const cnt = vocabEntries.filter(v => v.class_id === c.id).length;
+            return <option key={c.id} value={c.id}>{c.name} ({cnt})</option>;
+          })}
+        </select>
+      </div>
+
+      {/* Selection toolbar */}
+      {filtered.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, background: "#e3f2fd", borderRadius: 10, padding: "6px 10px" }}>
+          <button onClick={toggleSelectAll} style={btn("#fff", "#1976d2", "#90caf9")}>
+            {selectedIds.size === filtered.length && filtered.length > 0 ? "✕ Цэвэрлэх" : "✓ Бүгдийг"}
+          </button>
+          <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700 }}>
+            {selectedIds.size} / {filtered.length} сонгогдсон
+          </div>
+          {selectedIds.size > 0 && (
+            <button onClick={() => setShowCopyTo(true)} className="k-pop"
+              style={{ ...btn("#1976d2", "#fff"), boxShadow: "0 3px 0 #0d47a1" }}>
+              📋 Хуулах
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Үгсийн жагсаалт */}
+      <div style={{ maxHeight: "55vh", overflowY: "auto" }}>
+        {grouped.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#aaa", fontSize: 13 }}>
+            <div style={{ fontSize: 40, marginBottom: 8, opacity: .4 }}>📭</div>
+            Үг байхгүй
+          </div>
+        ) : grouped.map(g => (
+          <div key={g.date} style={{ marginBottom: 12, background: "#fff", borderRadius: 12, padding: 10, border: "1px solid #e0e0e0" }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#7c3aed", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #f5f0ff", display: "flex", justifyContent: "space-between" }}>
+              <span>📅 {g.date}</span>
+              <span style={{ fontSize: 10, opacity: .6 }}>{g.items.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {g.items.map(v => {
+                const isSel = selectedIds.has(v.id);
+                const isGr = v.type === "grammar";
+                const cls = classes.find(c => c.id === v.class_id);
+                return (
+                  <div key={v.id} onClick={() => {
+                    const ns = new Set(selectedIds);
+                    if (isSel) ns.delete(v.id); else ns.add(v.id);
+                    setSelectedIds(ns);
+                  }} style={{
+                    padding: "6px 10px", borderRadius: 8, cursor: "pointer",
+                    background: isSel ? "#e3f2fd" : (isGr ? "#f5f0ff" : "#fffdf5"),
+                    border: isSel ? "2px solid #1976d2" : `1px solid ${isGr ? "#d4b8ff" : "#ffe082"}`,
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}>
+                    <div style={{ width: 18, height: 18, borderRadius: 5, background: isSel ? "#1976d2" : "#fff", border: `2px solid ${isSel ? "#1976d2" : "#ccc"}`, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 11, fontWeight: 800, flexShrink: 0 }}>
+                      {isSel ? "✓" : ""}
+                    </div>
+                    <span style={{ fontSize: 13, fontWeight: 800, color: isGr ? "#7c3aed" : "#b8860b", flex: 1 }}>
+                      {isGr ? "📖" : "📚"} {v.word} <span style={{ fontSize: 11, color: "#666", fontWeight: 500 }}>· {v.meaning}</span>
+                    </span>
+                    {selClsId === "all" && cls && (
+                      <span style={{ fontSize: 9, color: "#fff", background: cls.color, padding: "1px 6px", borderRadius: 6, fontWeight: 700 }}>{cls.name}</span>
+                    )}
+                    <button onClick={e => {
+                      e.stopPropagation();
+                      if (window.confirm(`"${v.word}" устгах уу?`)) {
+                        supaDelete("vocab_entries", v.id).then(() => onChanged && onChanged());
+                      }
+                    }} style={{ background: "transparent", border: "none", color: "#c62828", cursor: "pointer", fontSize: 13 }}>✕</button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Хуулах modal */}
+      {showCopyTo && (
+        <Overlay onClose={() => setShowCopyTo(false)} maxW={380}>
+          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12 }}>📋 Үгсийг хуулах</div>
+          <div style={{ background: "#e3f2fd", borderRadius: 10, padding: 10, marginBottom: 12, fontSize: 12, color: "#1976d2", fontWeight: 700 }}>
+            {selectedIds.size} үг/дүрэм сонгогдсон
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>🎯 АЛЬ АНГИ РУУ?</div>
+            <select value={copyTargetCls} onChange={e => setCopyTargetCls(e.target.value)} style={{ ...INP, cursor: "pointer" }}>
+              <option value="">Сонгох...</option>
+              {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>📅 АЛЬ ӨДӨРТ?</div>
+            <input type="date" value={copyTargetDate} onChange={e => setCopyTargetDate(e.target.value)} style={INP} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowCopyTo(false)} style={{ ...btn("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+            <button onClick={doCopy} disabled={copying || !copyTargetCls}
+              style={{ ...btn("#1976d2", "#fff"), flex: 2, justifyContent: "center", boxShadow: "0 3px 0 #0d47a1", opacity: (copying || !copyTargetCls) ? .5 : 1 }}>
+              {copying ? "⏳..." : `📋 ${selectedIds.size} үг хуулах`}
+            </button>
+          </div>
+        </Overlay>
+      )}
+    </div>
+  );
+}
+
+
 function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, classDays, vocabEntries,
   homeworks, homeworkSubs, exams, examSubs, isSuperAdmin, onToast }) {
   const [editNotes, setEditNotes] = useState(false);
   const [notes, setNotes] = useState(s.teacher_notes || "");
   const [showEditInfo, setShowEditInfo] = useState(false);
   const [editForm, setEditForm] = useState({
-    name: s.name || "", phone: s.phone || "", email: s.email || "",
+    name: s.name || "", phone: s.phone || "", email: s.email || "", rd: s.rd || "",
+    password: "", // хоосон үлдээвэл өөрчлөгдөхгүй
     enroll_date: s.enroll_date || "", level: s.level || 0,
     total_fee: s.total_fee || 0, next_due: s.next_due || "",
+    xp: s.xp || 0, theme_id: s.theme_id || "sakura",
   });
 
   const t = getTheme(s.theme_id);
@@ -3833,13 +4384,22 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
     try {
       const updates = {
         name: editForm.name.trim() || s.name,
-        phone: editForm.phone.trim() || null,
-        email: editForm.email.trim() || s.email,
         enroll_date: editForm.enroll_date || null,
         level: parseInt(editForm.level) || 0,
-        total_fee: parseInt(editForm.total_fee) || 0,
-        next_due: editForm.next_due || null,
       };
+      // Зөвхөн сүпэр-админ засаж болох зүйлс
+      if (isSuperAdmin) {
+        updates.phone = editForm.phone.trim() || null;
+        updates.email = editForm.email.trim() || s.email;
+        updates.rd = editForm.rd.trim() || null;
+        updates.total_fee = parseInt(editForm.total_fee) || 0;
+        updates.next_due = editForm.next_due || null;
+        updates.xp = parseInt(editForm.xp) || 0;
+        updates.theme_id = editForm.theme_id || "sakura";
+        if (editForm.password && editForm.password.length >= 6) {
+          updates.password = editForm.password;
+        }
+      }
       await upd(updates);
       onToast && onToast("✅ Хадгалагдлаа", "success");
       setShowEditInfo(false);
@@ -3876,15 +4436,30 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
             <input value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} style={INP} />
           </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📞 УТАС</div>
-            <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} style={INP} />
-          </div>
+          {isSuperAdmin && (
+            <>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📞 УТАС</div>
+                <input value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} style={INP} />
+              </div>
 
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📧 И-МЭЙЛ</div>
-            <input value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} style={INP} />
-          </div>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📧 И-МЭЙЛ</div>
+                <input value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} style={INP} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>🆔 РД (Регистр)</div>
+                <input value={editForm.rd} onChange={e => setEditForm({ ...editForm, rd: e.target.value })} style={INP} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>🔑 НУУЦ ҮГ ШИНЭЧЛЭХ</div>
+                <input type="text" value={editForm.password} onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                  placeholder="Хоосон үлдээвэл өөрчлөгдөхгүй" style={INP} />
+              </div>
+            </>
+          )}
 
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📅 БҮРТГҮҮЛСЭН ОГНОО</div>
@@ -3901,6 +4476,31 @@ function AdminStudentDetail({ s, setStudents, goBack, attMonth, setAttMonth, cla
 
           {isSuperAdmin && (
             <>
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>⚡ XP ОНОО (өөрчлөх)</div>
+                <input type="number" value={editForm.xp} onChange={e => setEditForm({ ...editForm, xp: e.target.value })} style={INP} />
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>🎨 THEME</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                  {THEMES.map(theme => {
+                    const isSel = editForm.theme_id === theme.id;
+                    return (
+                      <div key={theme.id} onClick={() => setEditForm({ ...editForm, theme_id: theme.id })}
+                        style={{
+                          background: theme.card, borderRadius: 10, padding: 8, cursor: "pointer",
+                          border: isSel ? `3px solid ${theme.accent}` : `2px solid ${theme.border}`,
+                          textAlign: "center",
+                        }}>
+                        <div style={{ fontSize: 22 }}>{theme.emoji}</div>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: theme.text, marginTop: 2 }}>{theme.name.split(" ")[1] || theme.name}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={{ marginBottom: 10 }}>
                 <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>💰 НИЙТ ТӨЛБӨР (₮)</div>
                 <input type="number" value={editForm.total_fee} onChange={e => setEditForm({ ...editForm, total_fee: e.target.value })} style={INP} />
@@ -3947,6 +4547,7 @@ export default function App() {
   const [showAddCls, setShowAddCls] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showOverdueDetail, setShowOverdueDetail] = useState(false);
+  const [showAllVocab, setShowAllVocab] = useState(false);
   const [loading, setLoading] = useState(!!user);
   const [toast, setToast] = useState(null);
   // New class form
@@ -4129,6 +4730,7 @@ export default function App() {
                 ⏳ Хүсэлт <span style={{ background: "#fff", color: "#ff9800", borderRadius: 8, padding: "1px 5px", fontSize: 10, fontWeight: 800, marginLeft: 4 }}>{pending.length}</span>
               </button>
             )}
+            <button onClick={() => setShowAllVocab(true)} style={btn("#e1f5fe", "#0288d1", "#81d4fa")}>📋 Үгс</button>
             {isSuperAdmin && <button onClick={() => setShowAdmin(true)} style={btn("#fff", "#7c3aed", "#d4b8ff")}>🔑 Удирдах</button>}
             {isSuperAdmin && <button onClick={() => setShowAddCls(true)} style={{ ...btn("#7c3aed", "#fff"), boxShadow: "0 3px 0 #5b21b6" }}>+ Анги</button>}
             <button onClick={() => loadAll(true)} style={btn("#f0f0f0", "#555")} title="Сэргээх">🔄</button>
@@ -4330,7 +4932,7 @@ export default function App() {
         {/* Admin Panel */}
         {showAdmin && (
           <AdminPanel students={students} setStudents={setStudents}
-            currentTeacherId={user.id}
+            currentTeacherId={user.id} classes={classes}
             onClose={() => setShowAdmin(false)} onToast={showToast}
             onRefresh={() => loadAll(true)} />
         )}
@@ -4389,6 +4991,15 @@ export default function App() {
             </Overlay>
           );
         })()}
+
+        {/* Бүх үгс — бүх ангиар filter + copy боломжтой */}
+        {showAllVocab && (
+          <Overlay onClose={() => setShowAllVocab(false)} maxW={560}>
+            <AllVocabsManager classes={visibleClasses} vocabEntries={vocabEntries}
+              onClose={() => setShowAllVocab(false)}
+              onChanged={() => loadAll(true)} onToast={showToast} />
+          </Overlay>
+        )}
 
         <Toast msg={toast?.msg} type={toast?.type} onDone={() => setToast(null)} />
       </div>
