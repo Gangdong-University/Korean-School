@@ -526,7 +526,7 @@ function usePullToRefresh(onRefresh) {
 // ════════════════════════════════════════════════════════════════════
 
 function AuthScreen({ onAuth }) {
-  const [mode, setMode] = useState("teacher"); // teacher | student | register
+  const [mode, setMode] = useState("teacher"); // teacher | student | register | forgot
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [busy, setBusy] = useState(false);
@@ -539,6 +539,11 @@ function AuthScreen({ onAuth }) {
   const [regPass, setRegPass] = useState("");
   const [classes, setClasses] = useState([]);
   const [regClassId, setRegClassId] = useState("");
+  // Forgot password fields
+  const [forgotRd, setForgotRd] = useState("");
+  const [forgotFoundUser, setForgotFoundUser] = useState(null); // {id, name, role}
+  const [forgotNewPass, setForgotNewPass] = useState("");
+  const [forgotNewPass2, setForgotNewPass2] = useState("");
 
   useEffect(() => {
     if (mode === "register" && classes.length === 0) {
@@ -618,11 +623,65 @@ function AuthScreen({ onAuth }) {
     setBusy(false);
   };
 
+  // ── НУУЦ ҮГ СЭРГЭЭХ — РД оруулаад хайх ──
+  const doForgotSearch = async () => {
+    if (!forgotRd.trim() || forgotRd.trim().length < 4) {
+      setErr("РД дугаараа зөв оруулна уу");
+      return;
+    }
+    setBusy(true); setErr("");
+    try {
+      const rd = forgotRd.trim();
+      // Сурагч + Багш хоёулангаас хайх
+      const [sts, ts] = await Promise.all([
+        supaSelect("students", `select=id,name,rd&rd=eq.${encodeURIComponent(rd)}`),
+        supaSelect("teachers", `select=id,name,rd&rd=eq.${encodeURIComponent(rd)}`),
+      ]);
+      if (sts && sts.length > 0) {
+        setForgotFoundUser({ ...sts[0], role: "student" });
+        setErr("");
+      } else if (ts && ts.length > 0) {
+        setForgotFoundUser({ ...ts[0], role: "teacher" });
+        setErr("");
+      } else {
+        setErr("⚠️ Энэ РД-тэй хэрэглэгч олдсонгүй. РД-ээ зөв оруулсан эсэхээ шалгана уу.");
+      }
+    } catch (e) { setErr("Алдаа: " + e.message); }
+    setBusy(false);
+  };
+
+  const doForgotReset = async () => {
+    if (!forgotNewPass || forgotNewPass.length < 6) {
+      setErr("Шинэ нууц үг 6+ тэмдэгт байх ёстой");
+      return;
+    }
+    if (forgotNewPass !== forgotNewPass2) {
+      setErr("Нууц үг таарахгүй байна");
+      return;
+    }
+    setBusy(true); setErr("");
+    try {
+      const table = forgotFoundUser.role === "student" ? "students" : "teachers";
+      await supaUpdate(table, forgotFoundUser.id, { password: forgotNewPass });
+      setErr("✅ Нууц үг шинэчлэгдлээ! Шинэ нууц үгээрээ нэвтрэнэ үү.");
+      // Auto-switch to login mode
+      setTimeout(() => {
+        setMode(forgotFoundUser.role === "student" ? "student" : "teacher");
+        setForgotRd(""); setForgotFoundUser(null);
+        setForgotNewPass(""); setForgotNewPass2("");
+        setErr("");
+      }, 2000);
+    } catch (e) { setErr("Алдаа: " + e.message); }
+    setBusy(false);
+  };
+
   const theme = mode === "teacher"
     ? { bg1: "#a78bfa", bg2: "#7c3aed", emoji: "👩‍🏫", title: "Багш нэвтрэх", sub: "Ангиа удирдах" }
     : mode === "student"
       ? { bg1: "#f48cb1", bg2: "#e91e8c", emoji: "🌸", title: "Сурагч нэвтрэх", sub: "Өнөөдрийн хичээлээ үзье!" }
-      : { bg1: "#4db6ac", bg2: "#00897b", emoji: "✏️", title: "Бүртгүүлэх", sub: "Шинэ сурагч" };
+      : mode === "forgot"
+        ? { bg1: "#ff8a65", bg2: "#e64a19", emoji: "🔑", title: "Нууц үг сэргээх", sub: "РД-ээрээ сэргээх" }
+        : { bg1: "#4db6ac", bg2: "#00897b", emoji: "✏️", title: "Бүртгүүлэх", sub: "Шинэ сурагч" };
 
   return (
     <div style={{
@@ -654,33 +713,42 @@ function AuthScreen({ onAuth }) {
           <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>Кандун Their</div>
         </div>
 
-        {/* Mode tabs */}
-        <div style={{ display: "flex", background: "#f0f0f5", borderRadius: 12, padding: 3, marginBottom: 16 }}>
-          {[["teacher", "👩‍🏫 Багш"], ["student", "🎓 Сурагч"], ["register", "✏️ Бүртгэл"]].map(([m, label]) => (
-            <button key={m} onClick={() => { setMode(m); setErr(""); }}
-              style={{
-                flex: 1, padding: "8px 4px", borderRadius: 10, border: "none",
-                background: mode === m ? "#fff" : "transparent",
-                color: mode === m ? theme.bg2 : "#888",
-                fontWeight: mode === m ? 800 : 600, fontSize: 11, cursor: "pointer",
-                transition: "all .15s",
-                boxShadow: mode === m ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
-              }}>{label}</button>
-          ))}
-        </div>
+        {/* Mode tabs — forgot үед нуух */}
+        {mode !== "forgot" && (
+          <div style={{ display: "flex", background: "#f0f0f5", borderRadius: 12, padding: 3, marginBottom: 16 }}>
+            {[["teacher", "👩‍🏫 Багш"], ["student", "🎓 Сурагч"], ["register", "✏️ Бүртгэл"]].map(([m, label]) => (
+              <button key={m} onClick={() => { setMode(m); setErr(""); }}
+                style={{
+                  flex: 1, padding: "8px 4px", borderRadius: 10, border: "none",
+                  background: mode === m ? "#fff" : "transparent",
+                  color: mode === m ? theme.bg2 : "#888",
+                  fontWeight: mode === m ? 800 : 600, fontSize: 11, cursor: "pointer",
+                  transition: "all .15s",
+                  boxShadow: mode === m ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
+                }}>{label}</button>
+            ))}
+          </div>
+        )}
 
         <div style={{ textAlign: "center", marginBottom: 14, fontSize: 13, color: "#555", fontWeight: 600 }}>
           {theme.sub}
         </div>
 
         {/* Form */}
-        {mode !== "register" ? (
+        {(mode === "teacher" || mode === "student") ? (
           <>
             <input type="email" placeholder="И-мэйл" value={email} onChange={e => setEmail(e.target.value)}
               style={{ ...INP, marginBottom: 10 }} autoComplete="username" />
             <input type="password" placeholder="Нууц үг" value={pass} onChange={e => setPass(e.target.value)}
               onKeyDown={e => e.key === "Enter" && (mode === "teacher" ? doLoginTeacher() : doLoginStudent())}
-              style={{ ...INP, marginBottom: 14 }} autoComplete="current-password" />
+              style={{ ...INP, marginBottom: 6 }} autoComplete="current-password" />
+            {/* Нууц үг мартсан уу? */}
+            <div style={{ textAlign: "right", marginBottom: 10 }}>
+              <button onClick={() => { setMode("forgot"); setErr(""); }}
+                style={{ background: "transparent", border: "none", color: theme.bg2, fontSize: 11, fontWeight: 700, cursor: "pointer", textDecoration: "underline" }}>
+                🔑 Нууц үг мартсан уу?
+              </button>
+            </div>
             <button onClick={mode === "teacher" ? doLoginTeacher : doLoginStudent} disabled={busy || !email || !pass}
               style={{
                 width: "100%", padding: 13, borderRadius: 12, border: "none",
@@ -692,7 +760,7 @@ function AuthScreen({ onAuth }) {
               {busy ? "⏳ Уншиж байна..." : `${theme.emoji} Нэвтрэх`}
             </button>
           </>
-        ) : (
+        ) : mode === "register" ? (
           <>
             <input placeholder="Овог нэр" value={regName} onChange={e => setRegName(e.target.value)} style={{ ...INP, marginBottom: 8 }} />
             <input type="email" placeholder="И-мэйл хаяг (нэвтрэхэд хэрэглэнэ)" value={regEmail} onChange={e => setRegEmail(e.target.value)} style={{ ...INP, marginBottom: 8 }} autoComplete="email" />
@@ -712,6 +780,68 @@ function AuthScreen({ onAuth }) {
                 opacity: busy ? 0.6 : 1,
               }}>
               {busy ? "⏳..." : "✏️ Бүртгүүлэх"}
+            </button>
+          </>
+        ) : (
+          // ── FORGOT PASSWORD ──
+          <>
+            {!forgotFoundUser ? (
+              <>
+                <div style={{ background: "#fff3e0", borderRadius: 10, padding: 10, marginBottom: 12, fontSize: 11, color: "#e65100", lineHeight: 1.4 }}>
+                  💡 РД дугаараа оруулна уу. Систем таныг олж, шинэ нууц үг үүсгэх боломж өгнө.
+                </div>
+                <input placeholder="🆔 РД дугаар"
+                  value={forgotRd} onChange={e => setForgotRd(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && doForgotSearch()}
+                  style={{ ...INP, marginBottom: 14 }} />
+                <button onClick={doForgotSearch} disabled={busy || !forgotRd.trim()}
+                  style={{
+                    width: "100%", padding: 13, borderRadius: 12, border: "none",
+                    background: `linear-gradient(135deg,${theme.bg1},${theme.bg2})`,
+                    color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer",
+                    boxShadow: `0 4px 14px ${theme.bg2}55`,
+                    opacity: (busy || !forgotRd.trim()) ? 0.6 : 1, marginBottom: 8,
+                  }}>
+                  {busy ? "⏳ Хайж байна..." : "🔍 РД-аар хайх"}
+                </button>
+              </>
+            ) : (
+              // Хэрэглэгч олдсон — шинэ нууц үг
+              <>
+                <div style={{ background: "#e8f5e9", borderRadius: 10, padding: 12, marginBottom: 12, textAlign: "center" }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#1b5e20", marginBottom: 4 }}>
+                    ✅ Хэрэглэгч олдлоо!
+                  </div>
+                  <div style={{ fontSize: 13, color: "#2e7d32" }}>
+                    {forgotFoundUser.role === "student" ? "🎓" : "👩‍🏫"} <b>{forgotFoundUser.name}</b>
+                  </div>
+                </div>
+                <input type="password" placeholder="Шинэ нууц үг (6+ тэмдэгт)"
+                  value={forgotNewPass} onChange={e => setForgotNewPass(e.target.value)}
+                  style={{ ...INP, marginBottom: 8 }} />
+                <input type="password" placeholder="Шинэ нууц үг (давтан)"
+                  value={forgotNewPass2} onChange={e => setForgotNewPass2(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && doForgotReset()}
+                  style={{ ...INP, marginBottom: 14 }} />
+                <button onClick={doForgotReset} disabled={busy || !forgotNewPass || !forgotNewPass2}
+                  style={{
+                    width: "100%", padding: 13, borderRadius: 12, border: "none",
+                    background: `linear-gradient(135deg,${theme.bg1},${theme.bg2})`,
+                    color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer",
+                    boxShadow: `0 4px 14px ${theme.bg2}55`,
+                    opacity: (busy || !forgotNewPass || !forgotNewPass2) ? 0.6 : 1, marginBottom: 8,
+                  }}>
+                  {busy ? "⏳..." : "💾 Нууц үг шинэчлэх"}
+                </button>
+                <button onClick={() => { setForgotFoundUser(null); setForgotNewPass(""); setForgotNewPass2(""); setErr(""); }}
+                  style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e0e0e0", background: "#fff", color: "#666", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>
+                  ← Өөр РД оруулах
+                </button>
+              </>
+            )}
+            <button onClick={() => { setMode("student"); setErr(""); setForgotRd(""); setForgotFoundUser(null); setForgotNewPass(""); setForgotNewPass2(""); }}
+              style={{ width: "100%", padding: 8, borderRadius: 10, border: "none", background: "transparent", color: "#666", fontSize: 12, cursor: "pointer", marginTop: 8, textDecoration: "underline" }}>
+              ← Нэвтрэх рүү буцах
             </button>
           </>
         )}
@@ -2267,21 +2397,34 @@ function WalkingBuddies({ progress, lostItem }) {
 // ── Flashcard ─────────────────────────────────────────────────
 function FlashcardExercise({ current, t, onNext }) {
   const [flipped, setFlipped] = useState(false);
-  useEffect(() => { setFlipped(false); }, [current]);
+  const [emoji, setEmoji] = useState("📝");
+  useEffect(() => {
+    setFlipped(false);
+    // Offline emoji эхлэлд харуулна, AI-аар сайжруулах
+    const offEmoji = getEmojiForWord(current.target.word, current.target.meaning);
+    setEmoji(offEmoji);
+    if (offEmoji === "📝") {
+      getEmojiByAI(current.target.word, current.target.meaning).then(e => setEmoji(e));
+    }
+  }, [current]);
   return (
     <div className="k-pop" key={current.target.word}>
       <div onClick={() => setFlipped(f => !f)} style={{
         background: flipped ? t.accent : "#fff",
         color: flipped ? "#fff" : t.text,
-        borderRadius: 22, padding: "40px 24px", textAlign: "center", cursor: "pointer",
-        minHeight: 220, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        borderRadius: 22, padding: "30px 24px", textAlign: "center", cursor: "pointer",
+        minHeight: 240, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         border: `3px solid ${t.border}`, boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
         transition: "all 0.4s",
       }}>
-        <div style={{ fontSize: 11, opacity: .7, fontWeight: 700, marginBottom: 10, letterSpacing: 1 }}>
+        <div style={{ fontSize: 11, opacity: .7, fontWeight: 700, marginBottom: 8, letterSpacing: 1 }}>
           {flipped ? "ХАРИУ" : "ҮГ"}
         </div>
-        <div style={{ fontSize: flipped ? 30 : 44, fontWeight: 900, marginBottom: 14 }}>
+        {/* Emoji sticker */}
+        <div style={{ fontSize: 50, marginBottom: 8, lineHeight: 1, filter: flipped ? "brightness(1.2)" : "none" }}>
+          {emoji}
+        </div>
+        <div style={{ fontSize: flipped ? 30 : 38, fontWeight: 900, marginBottom: 12 }}>
           {flipped ? current.target.meaning : current.target.word}
         </div>
         {!flipped && (
@@ -2290,7 +2433,7 @@ function FlashcardExercise({ current, t, onNext }) {
             🔊 Сонсох
           </button>
         )}
-        <div style={{ fontSize: 10, opacity: .6, marginTop: 16, fontWeight: 600 }}>
+        <div style={{ fontSize: 10, opacity: .6, marginTop: 14, fontWeight: 600 }}>
           {flipped ? "Дахин дарж эргүүл" : "👆 Дарж эргүүл"}
         </div>
       </div>
@@ -2623,6 +2766,7 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
       { id: "reverse_choice", emoji: "🔄", title: "Mongol→Korean", desc: "Эсрэг чиглэлд таних", color: "#ab47bc" },
       { id: "spelling", emoji: "⌨️", title: "Үсэглэх", desc: "Солонгосоор бичих", color: "#ff7043" },
       { id: "listening", emoji: "👂", title: "Сонсох", desc: "Дуудлагыг сонсож бичих", color: "#ec407a" },
+      { id: "sentence", emoji: "✍️", title: "Өгүүлбэр", desc: "Үгийг өгүүлбэрт оруулж сурах", color: "#7c3aed" },
     ];
     return (
       <div style={{ minHeight: "100vh", background: t.bg, padding: 14, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto" }}>
@@ -2786,6 +2930,25 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
       )}
       {exerciseType === "listening" && (
         <ListeningExercise current={current} t={t} userAnswer={userAnswer} setUserAnswer={setUserAnswer} showResult={showResult} onSubmit={() => submitAnswer(userAnswer, current.target.word)} />
+      )}
+      {exerciseType === "sentence" && (
+        <SentenceExercise current={{ ...current, level }} t={t} showResult={showResult}
+          onSubmit={(known) => {
+            // "Ойлгож байна" → зөв, "Ойлгохгүй" → буруу (алдсан үгсэд хадгална)
+            if (known) {
+              setCorrectCount(c => c + 1);
+              setStreak(s => { const ns = s + 1; setMaxStreak(m => Math.max(m, ns)); return ns; });
+            } else {
+              setWrongCount(c => c + 1);
+              setStreak(0);
+              setLostItem(true);
+              const cw = items[currentIdx]?.target?.word;
+              if (cw) setMissedWords(prev => [...prev, cw]);
+              setTimeout(() => setLostItem(false), 1500);
+            }
+            if (currentIdx + 1 >= items.length) finishExercise(correctCount + (known ? 1 : 0));
+            else setCurrentIdx(i => i + 1);
+          }} />
       )}
 
       {showResult && (
