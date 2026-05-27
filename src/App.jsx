@@ -15,7 +15,7 @@ const supaHeaders = () => ({
 });
 
 // Timeout-той fetch (network алдаагаа илрүүлэх)
-async function fetchWithTimeout(url, options = {}, timeout = 15000) {
+async function fetchWithTimeout(url, options = {}, timeout = 20000) {
   const controller = new AbortController();
   const tm = setTimeout(() => controller.abort(), timeout);
   try {
@@ -28,16 +28,17 @@ async function fetchWithTimeout(url, options = {}, timeout = 15000) {
   }
 }
 
-// Retry-тэй fetch — алдаа гарвал 3 удаа дахин оролдох
-async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+// Retry-тэй fetch — ЗӨВХӨН READ хүсэлтэд хэрэглэнэ (GET)
+// POST/PATCH/DELETE-д retry хийвэл DAVHAR INSERT/UPDATE үүснэ!
+async function fetchWithRetry(url, options = {}, maxRetries = 2) {
   let lastError;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const r = await fetchWithTimeout(url, options);
-      // 429 (rate limit) эсвэл 5xx алдаа гарвал — хүлээгээд дахин оролдох
-      if (r.status === 429 || (r.status >= 500 && r.status < 600)) {
+      // 429 (rate limit) → хүлээгээд дахин оролдох
+      if (r.status === 429) {
         if (attempt < maxRetries - 1) {
-          await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt))); // 500, 1000, 2000 ms
+          await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
           continue;
         }
       }
@@ -45,45 +46,88 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
     } catch (e) {
       lastError = e;
       if (attempt < maxRetries - 1) {
-        await new Promise(res => setTimeout(res, 500 * Math.pow(2, attempt)));
+        await new Promise(res => setTimeout(res, 800));
       }
     }
   }
   throw lastError || new Error("Network error");
 }
 
-async function supaSelect(table, query = "select=*") {
-  try {
-    const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?${query}`, {
-      headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
+// === Concurrent Request Limiter ===
+// Нэг дор хэт олон хүсэлт явуулахаас сэргийлнэ
+// (Supabase Free tier 60 concurrent ~ багасгана)
+const _pendingRequests = new Set();
+const MAX_CONCURRENT = 4; // нэг дор max 4 хүсэлт явна
+const _queue = [];
+
+async function withConcurrencyLimit(fn) {
+  while (_pendingRequests.size >= MAX_CONCURRENT) {
+    await new Promise(res => {
+      _queue.push(res);
     });
-    if (!r.ok) {
-      console.warn(`Supabase ${table}: ${r.status}`);
-      return [];
-    }
-    return await r.json();
-  } catch (e) {
-    console.warn(`Supabase ${table} error:`, e.message);
-    return [];
+  }
+  const id = Math.random();
+  _pendingRequests.add(id);
+  try {
+    return await fn();
+  } finally {
+    _pendingRequests.delete(id);
+    const next = _queue.shift();
+    if (next) next();
   }
 }
+
+async function supaSelect(table, query = "select=*") {
+  return withConcurrencyLimit(async () => {
+    try {
+      const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?${query}`, {
+        headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
+      });
+      if (!r.ok) {
+        console.warn(`Supabase ${table}: ${r.status}`);
+        return [];
+      }
+      return await r.json();
+    } catch (e) {
+      console.warn(`Supabase ${table} error:`, e.message);
+      return [];
+    }
+  });
+}
+
+// ⚠️ ЧУХАЛ: INSERT/UPDATE/DELETE-д retry хийхгүй (davhar insert garahgui)
 async function supaInsert(table, body) {
-  const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}`, {
-    method: "POST", headers: supaHeaders(), body: JSON.stringify(body),
+  return withConcurrencyLimit(async () => {
+    const r = await fetchWithTimeout(`${SUPA_URL}/rest/v1/${table}`, {
+      method: "POST", headers: supaHeaders(), body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const errText = await r.text();
+      // Уникал constraint violation алдаа бол silent
+      if (r.status === 409 || errText.includes("duplicate")) {
+        throw new Error("Аль хэдийн нэмэгдсэн байна");
+      }
+      throw new Error(errText || `Error ${r.status}`);
+    }
+    return await r.json();
   });
-  if (!r.ok) throw new Error(await r.text());
-  return await r.json();
 }
+
 async function supaUpdate(table, id, body) {
-  const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
-    method: "PATCH", headers: supaHeaders(), body: JSON.stringify(body),
+  return withConcurrencyLimit(async () => {
+    const r = await fetchWithTimeout(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
+      method: "PATCH", headers: supaHeaders(), body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r;
   });
-  if (!r.ok) throw new Error(await r.text());
-  return r;
 }
+
 async function supaDelete(table, id) {
-  await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
-    method: "DELETE", headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
+  return withConcurrencyLimit(async () => {
+    await fetchWithTimeout(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
+      method: "DELETE", headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
+    });
   });
 }
 
@@ -4722,34 +4766,45 @@ export default function App() {
   const loadAll = useCallback(async (silent) => {
     if (!silent) setLoading(true);
     try {
-      const [cls, sts, voc, hws, hsubs, exs, esubs, pends] = await Promise.all([
+      // ХУРДНЫ ОПТИМИЗАЦИ: Эхлээд хамгийн чухал 3 хүснэгт (анги, сурагч, үг) ачаалж нүүр харагдуулна
+      // Дараа нь арын background-д бусад мэдээлэл ачаална
+      const [cls, sts, voc] = await Promise.all([
         supaSelect("classes"),
         supaSelect("students"),
         supaSelect("vocab_entries"),
-        supaSelect("homeworks").catch(() => []),
-        supaSelect("homework_submissions").catch(() => []),
-        supaSelect("exams").catch(() => []),
-        supaSelect("exam_submissions").catch(() => []),
-        supaSelect("pending_students").catch(() => []),
       ]);
-      setClasses(cls);
-      setStudents(sts.map(s => ({
+      setClasses(cls || []);
+      setStudents((sts || []).map(s => ({
         ...s,
         attendance: s.attendance && typeof s.attendance === "object" ? s.attendance : {},
         badges: Array.isArray(s.badges) ? s.badges : [],
         weak_words: Array.isArray(s.weak_words) ? s.weak_words : [],
       })));
-      setVocabEntries(voc);
-      setHomeworks(hws);
-      setHomeworkSubs(hsubs);
-      setExams(exs);
-      setExamSubs(esubs);
-      setPending(pends);
+      setVocabEntries(voc || []);
+      if (!silent) setLoading(false);  // нүүр харагдуулчихсан
+
+      // Хоёрдогч мэдээлэл — арын background-д үргэлжлүүлж ачаална
+      try {
+        const [hws, hsubs, exs, esubs, pends] = await Promise.all([
+          supaSelect("homeworks").catch(() => []),
+          supaSelect("homework_submissions").catch(() => []),
+          supaSelect("exams").catch(() => []),
+          supaSelect("exam_submissions").catch(() => []),
+          supaSelect("pending_students").catch(() => []),
+        ]);
+        setHomeworks(hws || []);
+        setHomeworkSubs(hsubs || []);
+        setExams(exs || []);
+        setExamSubs(esubs || []);
+        setPending(pends || []);
+      } catch (e) {
+        console.warn("Secondary load error:", e.message);
+      }
     } catch (e) {
       console.error("Load error", e);
       showToast("❌ Мэдээлэл ачаалахад алдаа гарлаа", "error");
+      if (!silent) setLoading(false);
     }
-    if (!silent) setLoading(false);
   }, []);
 
   useEffect(() => { if (user) loadAll(false); }, [user]);
