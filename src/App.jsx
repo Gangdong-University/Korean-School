@@ -205,7 +205,7 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
 
 // ── GEMINI AI ─────────────────────────────────────────────────────────
 // ⚠️ API key-ийг доорх мөрөнд тавьна уу (https://aistudio.google.com)
-const GEMINI_API_KEY = ""; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
+const GEMINI_API_KEY = "AIzaSyAOj0zck5fqmK2MwV0ZRM3t224I5CweLHM"; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`;
 
 async function geminiCall(prompt, opts = {}) {
