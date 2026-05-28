@@ -205,7 +205,7 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
 
 // ── GEMINI AI ─────────────────────────────────────────────────────────
 // ⚠️ API key-ийг доорх мөрөнд тавьна уу (https://aistudio.google.com)
-const GEMINI_API_KEY = "AIzaSyAOj0zck5fqmK2MwV0ZRM3t224I5CweLHM"; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
+const GEMINI_API_KEY = ""; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`;
 
 async function geminiCall(prompt, opts = {}) {
@@ -3563,6 +3563,12 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
   const [vocabWord, setVocabWord] = useState("");
   const [vocabMean, setVocabMean] = useState("");
   const [translating, setTranslating] = useState(false);
+  // Bulk paste
+  const [showBulkPaste, setShowBulkPaste] = useState(false);
+  const [bulkKr, setBulkKr] = useState("");
+  const [bulkMn, setBulkMn] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkTranslating, setBulkTranslating] = useState(false);
   // New student
   const [ns, setNs] = useState({ name: "", phone: "", email: "", password: "", level: 0 });
 
@@ -3639,6 +3645,58 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
     setTranslating(false);
   };
 
+  // Bulk paste — мөр болгоныг тусдаа үг болгож хослуулна
+  const bulkRows = useMemo(() => {
+    const krLines = bulkKr.split("\n").map(l => l.trim()).filter(l => l);
+    const mnLines = bulkMn.split("\n").map(l => l.trim()).filter(l => l);
+    const max = Math.max(krLines.length, mnLines.length);
+    const rows = [];
+    for (let i = 0; i < max; i++) {
+      rows.push({ kr: krLines[i] || "", mn: mnLines[i] || "" });
+    }
+    return rows;
+  }, [bulkKr, bulkMn]);
+
+  // Bulk дотор монгол хоосон мөрүүдийг AI-аар бөглөх
+  const doBulkTranslate = async () => {
+    const krLines = bulkKr.split("\n").map(l => l.trim()).filter(l => l);
+    if (krLines.length === 0) { onToast && onToast("❌ Эхлээд солонгос үгс оруулна уу", "error"); return; }
+    setBulkTranslating(true);
+    try {
+      const translations = [];
+      for (const kr of krLines) {
+        const mn = await translateKrToMn(kr);
+        translations.push(mn || "");
+      }
+      setBulkMn(translations.join("\n"));
+      onToast && onToast(`✅ ${translations.filter(t => t).length} үг орчуулагдлаа`, "success");
+    } catch (e) { onToast && onToast("❌ AI алдаа: " + e.message, "error"); }
+    setBulkTranslating(false);
+  };
+
+  const doBulkAdd = async () => {
+    const validRows = bulkRows.filter(r => r.kr && r.mn);
+    if (validRows.length === 0) {
+      onToast && onToast("❌ Солонгос ба монгол үг хоёулаа байх ёстой", "error"); return;
+    }
+    setBulkSaving(true);
+    try {
+      const inserts = validRows.map((r, i) => ({
+        id: `v${Date.now()}${i}${Math.random().toString(36).slice(2, 5)}`,
+        class_id: cls.id,
+        word: r.kr, meaning: r.mn,
+        type: vocabType, date: vocabDate,
+      }));
+      // Нэг нэгээр нь нэмэх (Firebase batch биш — backward compat)
+      for (const item of inserts) await supaInsert("vocab_entries", item);
+      onToast && onToast(`✅ ${validRows.length} ${vocabType === "grammar" ? "дүрэм" : "үг"} нэмэгдлээ!`, "success");
+      setBulkKr(""); setBulkMn("");
+      setShowBulkPaste(false);
+      refreshAll && refreshAll();
+    } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+    setBulkSaving(false);
+  };
+
   const sessions = getSessions(cls.days, attMonth);
   // Sort students by attendance %
   const sortedStudents = [...students].map(s => {
@@ -3691,7 +3749,10 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
         <div className="k-fade" style={{ background: "#fffdf5", borderRadius: 14, padding: 12, marginBottom: 14, border: "2px solid #ffe082" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <div style={{ fontWeight: 800, fontSize: 14, color: "#b8860b" }}>📚 Үг/Дүрэм нэмэх</div>
-            <button onClick={() => setShowVocab(false)} style={btn("#fff", "#888", "#e0e0e0")}>✕</button>
+            <div style={{ display: "flex", gap: 5 }}>
+              <button onClick={() => setShowBulkPaste(true)} style={{ ...btn("#7c3aed", "#fff"), boxShadow: "0 2px 0 #5b21b6" }}>📋 Бөөнөөр</button>
+              <button onClick={() => setShowVocab(false)} style={btn("#fff", "#888", "#e0e0e0")}>✕</button>
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
@@ -3989,6 +4050,97 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
         <Overlay onClose={() => setShowVocabList(false)} maxW={520}>
           <VocabListView vocabEntries={classVocabs} t={{ accent: cls.color, text: "#1a1a2e", soft: cls.color + "22", card: "#fff", border: cls.color + "55" }}
             className={cls.name} weakWords={[]} />
+        </Overlay>
+      )}
+
+      {/* 📋 BULK PASTE — Бөөнөөр үг нэмэх */}
+      {showBulkPaste && (
+        <Overlay onClose={() => setShowBulkPaste(false)} maxW={560}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 24 }}>📋</span>
+            Бөөнөөр үг нэмэх
+          </div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 14, lineHeight: 1.5, background: "#f0f4ff", padding: 10, borderRadius: 10 }}>
+            💡 <b>Хэрхэн ашиглах:</b><br />
+            1. Gemini-аас солонгос үгсээ хуулж зүүн талд тавь<br />
+            2. <b>✨ AI орчуулах</b> дарвал монгол утга автомат бөглөгдөнө<br />
+            3. Эсвэл монгол утгаа баруун талд гар аргаар тавь<br />
+            4. <b>Бүгдийг нэмэх</b> дарна
+          </div>
+
+          {/* Огноо + төрөл */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            <input type="date" value={vocabDate} onChange={e => setVocabDate(e.target.value)} style={{ ...INP, flex: 1, fontSize: 12 }} />
+            <select value={vocabType} onChange={e => setVocabType(e.target.value)} style={{ ...INP, width: 110, fontSize: 12, cursor: "pointer" }}>
+              <option value="vocab">📚 Үг</option>
+              <option value="grammar">📖 Дүрэм</option>
+            </select>
+          </div>
+
+          {/* 2 textarea зэрэгцээ */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#7c3aed", marginBottom: 4 }}>🇰🇷 СОЛОНГОС (мөр бүрд 1 үг)</div>
+              <textarea value={bulkKr} onChange={e => setBulkKr(e.target.value)}
+                placeholder={"사과\n학교\n선생님\n..."}
+                rows={10}
+                style={{ ...INP, fontSize: 14, fontFamily: "inherit", resize: "vertical", lineHeight: 1.6 }} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#b8860b", marginBottom: 4 }}>🇲🇳 МОНГОЛ (мөр бүрд 1 утга)</div>
+              <textarea value={bulkMn} onChange={e => setBulkMn(e.target.value)}
+                placeholder={"алим\nсургууль\nбагш\n..."}
+                rows={10}
+                style={{ ...INP, fontSize: 13, fontFamily: "inherit", resize: "vertical", lineHeight: 1.6 }} />
+            </div>
+          </div>
+
+          {/* AI орчуулах товч */}
+          <button onClick={doBulkTranslate} disabled={bulkTranslating || !bulkKr.trim()}
+            style={{ width: "100%", ...btn("#42a5f5", "#fff"), justifyContent: "center", marginBottom: 10, padding: 10, opacity: (bulkTranslating || !bulkKr.trim()) ? .5 : 1 }}>
+            {bulkTranslating ? "⏳ Орчуулж байна..." : "✨ AI-аар монгол руу орчуулах"}
+          </button>
+
+          {/* Preview хүснэгт */}
+          {bulkRows.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#555", marginBottom: 6 }}>
+                👀 Урьдчилан харах ({bulkRows.filter(r => r.kr && r.mn).length}/{bulkRows.length} бэлэн)
+              </div>
+              <div style={{ maxHeight: 160, overflowY: "auto", border: "1px solid #e0e0e0", borderRadius: 10 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ position: "sticky", top: 0, background: "#f5f0ff" }}>
+                    <tr>
+                      <th style={{ padding: "6px 8px", textAlign: "left", width: 30 }}>#</th>
+                      <th style={{ padding: "6px 8px", textAlign: "left" }}>🇰🇷 Солонгос</th>
+                      <th style={{ padding: "6px 8px", textAlign: "left" }}>🇲🇳 Монгол</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bulkRows.map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid #f0f0f0", background: (!r.kr || !r.mn) ? "#fff5f5" : "#fff" }}>
+                        <td style={{ padding: "5px 8px", color: "#aaa" }}>{i + 1}</td>
+                        <td style={{ padding: "5px 8px", fontWeight: 700, color: r.kr ? "#1a1a2e" : "#f44336" }}>
+                          {r.kr || "⚠️ хоосон"}
+                        </td>
+                        <td style={{ padding: "5px 8px", color: r.mn ? "#555" : "#f44336" }}>
+                          {r.mn || "⚠️ хоосон"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowBulkPaste(false)} style={{ ...btn("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+            <button onClick={doBulkAdd} disabled={bulkSaving || bulkRows.filter(r => r.kr && r.mn).length === 0}
+              style={{ ...btn("#7c3aed", "#fff"), flex: 2, justifyContent: "center", boxShadow: "0 3px 0 #5b21b6", opacity: (bulkSaving || bulkRows.filter(r => r.kr && r.mn).length === 0) ? .5 : 1 }}>
+              {bulkSaving ? "⏳ Хадгалж байна..." : `➕ ${bulkRows.filter(r => r.kr && r.mn).length} үг нэмэх`}
+            </button>
+          </div>
         </Overlay>
       )}
     </div>
