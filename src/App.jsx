@@ -411,6 +411,11 @@ const ANIMATIONS = `
 @keyframes kSpin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 @keyframes kWalk { 0%, 100% { transform: translateX(0) rotate(-2deg) } 50% { transform: translateX(2px) rotate(2deg) } }
 @keyframes kShake { 0%, 100% { transform: translateX(0) } 25% { transform: translateX(-3px) } 75% { transform: translateX(3px) } }
+@keyframes kGradient { 0% { background-position: 0% 50% } 50% { background-position: 100% 50% } 100% { background-position: 0% 50% } }
+@keyframes kWiggle { 0%, 100% { transform: rotate(0deg) } 25% { transform: rotate(-8deg) } 75% { transform: rotate(8deg) } }
+@keyframes kGlow { 0%, 100% { filter: drop-shadow(0 0 8px rgba(255,167,38,0.6)) } 50% { filter: drop-shadow(0 0 20px rgba(255,167,38,0.9)) } }
+@keyframes kRise { 0% { opacity: 0; transform: translateY(40px) scale(0.9) } 100% { opacity: 1; transform: translateY(0) scale(1) } }
+@keyframes kSpinSlow { from { transform: rotate(0) } to { transform: rotate(360deg) } }
 .k-fade { animation: kFade .4s ease both }
 .k-slide { animation: kSlide .4s ease both }
 .k-slideup { animation: kSlideUp .4s ease both }
@@ -419,6 +424,10 @@ const ANIMATIONS = `
 .k-float { animation: kFloat 3s ease-in-out infinite }
 .k-pulse { animation: kPulse 2s ease-in-out infinite }
 .k-walk { animation: kWalk .6s ease-in-out infinite }
+.k-wiggle { animation: kWiggle 2.5s ease-in-out infinite }
+.k-glow { animation: kGlow 2.5s ease-in-out infinite }
+.k-rise { animation: kRise .6s cubic-bezier(0.34, 1.56, 0.64, 1) both }
+.k-gradient { background-size: 200% 200%; animation: kGradient 5s ease infinite }
 .k-press:active { transform: scale(0.96); transition: transform .1s }
 .k-hover:hover { transform: translateY(-2px); transition: transform .15s }
 button { font-family: inherit }
@@ -717,81 +726,98 @@ function AuthScreen({ onAuth }) {
   };
 
   const theme = mode === "teacher"
-    ? { bg1: "#a78bfa", bg2: "#7c3aed", emoji: "👩‍🏫", title: "Багш нэвтрэх", sub: "Ангиа удирдах" }
+    ? { bg1: "#ffb74d", bg2: "#f57c00", emoji: "👩‍🏫", title: "Багш нэвтрэх", sub: "Ангиа удирдах" }
     : mode === "student"
-      ? { bg1: "#f48cb1", bg2: "#e91e8c", emoji: "🌸", title: "Сурагч нэвтрэх", sub: "Өнөөдрийн хичээлээ үзье!" }
+      ? { bg1: "#ffa726", bg2: "#ef6c00", emoji: "🌸", title: "Сурагч нэвтрэх", sub: "Өнөөдрийн хичээлээ үзье!" }
       : mode === "forgot"
         ? { bg1: "#ff8a65", bg2: "#e64a19", emoji: "🔑", title: "Нууц үг сэргээх", sub: "РД-ээрээ сэргээх" }
-        : { bg1: "#4db6ac", bg2: "#00897b", emoji: "✏️", title: "Бүртгүүлэх", sub: "Шинэ сурагч" };
+        : { bg1: "#ffd54f", bg2: "#ffa000", emoji: "✏️", title: "Бүртгүүлэх", sub: "Шинэ сурагч" };
 
   return (
-    <div style={{
+    <div className="k-gradient" style={{
       minHeight: "100vh",
-      background: `linear-gradient(135deg,${theme.bg1} 0%,${theme.bg2} 100%)`,
+      background: `linear-gradient(135deg,${theme.bg1} 0%,${theme.bg2} 50%,${theme.bg1} 100%)`,
+      backgroundSize: "200% 200%",
       display: "flex", alignItems: "center", justifyContent: "center",
       padding: 16, fontFamily: "system-ui", position: "relative", overflow: "hidden",
     }}>
       <style>{ANIMATIONS}</style>
 
-      {/* Animated background blobs */}
+      {/* Animated background */}
       <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-        {/* Big blobs */}
+        {/* Том гэрэлтэх blobs */}
         <div className="k-float" style={{
-          position: "absolute", top: "-10%", left: "-10%",
-          width: 300, height: 300, borderRadius: "50%",
-          background: `radial-gradient(circle,${theme.bg1}55,transparent 70%)`,
-          animationDuration: "8s",
+          position: "absolute", top: "-12%", left: "-12%",
+          width: 320, height: 320, borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(255,255,255,0.4), transparent 70%)",
+          animationDuration: "9s",
         }} />
         <div className="k-float" style={{
-          position: "absolute", bottom: "-15%", right: "-10%",
-          width: 350, height: 350, borderRadius: "50%",
-          background: `radial-gradient(circle,${theme.bg1}33,transparent 70%)`,
-          animationDuration: "10s", animationDelay: "1s",
+          position: "absolute", bottom: "-18%", right: "-12%",
+          width: 380, height: 380, borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(255,255,255,0.25), transparent 70%)",
+          animationDuration: "11s", animationDelay: "1s",
         }} />
-        {/* Floating emojis */}
-        {["🌸", "💖", "✨", "🌟", "💫", "🎨", "📚"].map((e, i) => (
+        {/* Хөвөгч emoji-ууд (солонгос+сургуулийн сэдэв) */}
+        {["🌸", "📚", "✏️", "🎓", "⭐", "🇰🇷", "💛", "🍊"].map((e, i) => (
           <div key={i} className="k-float" style={{
-            position: "absolute", left: `${5 + i * 13}%`, top: `${10 + (i % 4) * 22}%`,
-            fontSize: 28 + (i % 3) * 8, opacity: 0.25, animationDelay: `${i * 0.5}s`,
+            position: "absolute", left: `${4 + i * 12}%`, top: `${8 + (i % 4) * 23}%`,
+            fontSize: 26 + (i % 3) * 10, opacity: 0.3, animationDelay: `${i * 0.6}s`,
             animationDuration: `${5 + (i % 3) * 2}s`,
           }}>{e}</div>
         ))}
       </div>
 
-      <div className="k-pop" style={{
-        background: "#fff", borderRadius: 28, padding: 28,
+      <div className="k-rise" style={{
+        background: "rgba(255,255,255,0.97)", borderRadius: 32, padding: "32px 26px 26px",
         width: "100%", maxWidth: 400, position: "relative", zIndex: 1,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.5)",
+        boxShadow: "0 25px 70px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.6)",
         backdropFilter: "blur(20px)",
       }}>
-        {/* Header — Корея + Кандун */}
-        <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <div className="k-bounce" style={{ fontSize: 60, marginBottom: 8, lineHeight: 1 }}>{theme.emoji}</div>
-          <div style={{
-            fontWeight: 900, fontSize: 22, color: "#1a1a2e",
-            letterSpacing: "-0.5px", marginBottom: 2,
-          }}>한국어 학원</div>
-          <div style={{
-            fontSize: 13, fontWeight: 700,
+        {/* Header — том emoji дугуйтай */}
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          {/* Emoji circle with glow */}
+          <div className="k-glow" style={{
+            width: 92, height: 92, borderRadius: "50%", margin: "0 auto 14px",
             background: `linear-gradient(135deg,${theme.bg1},${theme.bg2})`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: `0 10px 30px ${theme.bg2}55`,
+            position: "relative",
+          }}>
+            <div className="k-wiggle" style={{ fontSize: 50, lineHeight: 1 }}>{theme.emoji}</div>
+            {/* Орбитлох жижиг од */}
+            <div className="k-spin-slow" style={{
+              position: "absolute", inset: -6, borderRadius: "50%",
+              border: "2px dashed rgba(255,255,255,0.5)",
+              animation: "kSpinSlow 12s linear infinite",
+            }} />
+          </div>
+          <div style={{
+            fontWeight: 900, fontSize: 26, color: "#1a1a2e",
+            letterSpacing: "-0.5px", marginBottom: 4,
+          }}>한국어 학원</div>
+          <div className="k-gradient" style={{
+            display: "inline-block",
+            fontSize: 14, fontWeight: 800,
+            background: `linear-gradient(135deg,${theme.bg1},${theme.bg2},${theme.bg1})`,
+            backgroundSize: "200% 200%",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
             backgroundClip: "text",
-            marginTop: 2,
           }}>🌸 Кандун University</div>
         </div>
 
         {/* Mode tabs — forgot үед нуух */}
         {mode !== "forgot" && (
-          <div style={{ display: "flex", background: "#f5f5fa", borderRadius: 14, padding: 4, marginBottom: 16, gap: 2 }}>
+          <div style={{ display: "flex", background: "#fff5e6", borderRadius: 16, padding: 5, marginBottom: 18, gap: 3 }}>
             {[["teacher", "👩‍🏫 Багш"], ["student", "🎓 Сурагч"], ["register", "✏️ Бүртгэл"]].map(([m, label]) => (
               <button key={m} onClick={() => { setMode(m); setErr(""); }}
                 style={{
-                  flex: 1, padding: "9px 4px", borderRadius: 11, border: "none",
-                  background: mode === m ? "#fff" : "transparent",
-                  color: mode === m ? theme.bg2 : "#999",
+                  flex: 1, padding: "10px 4px", borderRadius: 12, border: "none",
+                  background: mode === m ? `linear-gradient(135deg,${theme.bg1},${theme.bg2})` : "transparent",
+                  color: mode === m ? "#fff" : "#bf8f3f",
                   fontWeight: mode === m ? 800 : 600, fontSize: 11, cursor: "pointer",
                   transition: "all .2s",
-                  boxShadow: mode === m ? `0 2px 8px ${theme.bg2}33, 0 0 0 1px ${theme.bg2}22` : "none",
+                  boxShadow: mode === m ? `0 4px 12px ${theme.bg2}66` : "none",
                 }}>{label}</button>
             ))}
           </div>
@@ -821,12 +847,14 @@ function AuthScreen({ onAuth }) {
               </button>
             </div>
             <button onClick={mode === "teacher" ? doLoginTeacher : doLoginStudent} disabled={busy || !email || !pass}
+              className="k-press"
               style={{
-                width: "100%", padding: 13, borderRadius: 12, border: "none",
+                width: "100%", padding: 15, borderRadius: 16, border: "none",
                 background: `linear-gradient(135deg,${theme.bg1},${theme.bg2})`,
-                color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer",
-                boxShadow: `0 4px 14px ${theme.bg2}55`,
+                color: "#fff", fontWeight: 800, fontSize: 15, cursor: "pointer",
+                boxShadow: `0 6px 20px ${theme.bg2}66`,
                 opacity: (busy || !email || !pass) ? 0.6 : 1,
+                transition: "all .2s",
               }}>
               {busy ? "⏳ Уншиж байна..." : `${theme.emoji} Нэвтрэх`}
             </button>
