@@ -1,135 +1,132 @@
 // ═══════════════════════════════════════════════════════════════════
-// 🌸 КАНДУН UNIVERSITY KOREAN SCHOOL — v4.0 (бүхэлдээ шинэ)
+// 🌸 КАНДУН UNIVERSITY KOREAN SCHOOL — v5.0 FIREBASE
 // ═══════════════════════════════════════════════════════════════════
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { initializeApp } from "firebase/app";
+import {
+  getFirestore, collection, doc, getDoc, getDocs,
+  setDoc, updateDoc, deleteDoc,
+  query, where, orderBy, limit, onSnapshot, writeBatch,
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+} from "firebase/firestore";
 
-// ── SUPABASE ────────────────────────────────────────────────────────
-const SUPA_URL = "https://ftmvhmsvrtownqrnvbzo.supabase.co";
-const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ0bXZobXN2cnRvd25xcm52YnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwMjE5ODIsImV4cCI6MjA5NDU5Nzk4Mn0.TV0YMNDNRcjv8oVfekwjJYeMgHlix4c4J3l0CR2_HUI";
+// ── FIREBASE CONFIG ─────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyBywV41xPjIAys_GKyzFIRsAf997v5ZBzk",
+  authDomain: "gangdong-university1.firebaseapp.com",
+  projectId: "gangdong-university1",
+  storageBucket: "gangdong-university1.firebasestorage.app",
+  messagingSenderId: "948147246623",
+  appId: "1:948147246623:web:52fe6b5c7b4a43a76a272a",
+};
 
-const supaHeaders = () => ({
-  "apikey": SUPA_KEY,
-  "Authorization": `Bearer ${SUPA_KEY}`,
-  "Content-Type": "application/json",
-  "Prefer": "return=representation",
-});
+const fbApp = initializeApp(firebaseConfig);
+// ✨ Offline persistence идэвхжүүлэх — интернетгүй ажиллана
+// + multi-tab support (хэдэн tab нээсэн ч ажиллана)
+let db;
+try {
+  db = initializeFirestore(fbApp, {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  });
+} catch (e) {
+  // Хэрэв aль хэдийн initialize хийгдсэн бол энгийн getFirestore
+  db = getFirestore(fbApp);
+}
 
-// Timeout-той fetch (network алдаагаа илрүүлэх)
-async function fetchWithTimeout(url, options = {}, timeout = 20000) {
-  const controller = new AbortController();
-  const tm = setTimeout(() => controller.abort(), timeout);
+// ── FIREBASE HELPERS ─────────────────────────────────────────────
+async function fbSelect(coll, queryParams = {}) {
   try {
-    const r = await fetch(url, { ...options, signal: controller.signal });
-    clearTimeout(tm);
-    return r;
+    let q = collection(db, coll);
+    const constraints = [];
+    if (queryParams.where) {
+      for (const [field, op, value] of queryParams.where) {
+        constraints.push(where(field, op, value));
+      }
+    }
+    if (queryParams.orderBy) {
+      constraints.push(orderBy(queryParams.orderBy, queryParams.orderDir || "asc"));
+    }
+    if (queryParams.limit) constraints.push(limit(queryParams.limit));
+    if (constraints.length > 0) q = query(q, ...constraints);
+    const snapshot = await getDocs(q);
+    const docs = [];
+    snapshot.forEach(doc => docs.push({ id: doc.id, ...doc.data() }));
+    return docs;
   } catch (e) {
-    clearTimeout(tm);
-    throw e;
+    console.warn(`Firebase ${coll} read error:`, e.message);
+    return [];
   }
 }
 
-// Retry-тэй fetch — ЗӨВХӨН READ хүсэлтэд хэрэглэнэ (GET)
-// POST/PATCH/DELETE-д retry хийвэл DAVHAR INSERT/UPDATE үүснэ!
-async function fetchWithRetry(url, options = {}, maxRetries = 2) {
-  let lastError;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const r = await fetchWithTimeout(url, options);
-      // 429 (rate limit) → хүлээгээд дахин оролдох
-      if (r.status === 429) {
-        if (attempt < maxRetries - 1) {
-          await new Promise(res => setTimeout(res, 1000 * Math.pow(2, attempt)));
-          continue;
-        }
-      }
-      return r;
-    } catch (e) {
-      lastError = e;
-      if (attempt < maxRetries - 1) {
-        await new Promise(res => setTimeout(res, 800));
-      }
+async function fbInsert(coll, data) {
+  const { id, ...rest } = data;
+  const docId = id || `${coll.slice(0, 2)}${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  const ref = doc(db, coll, String(docId));
+  const cleaned = {};
+  Object.keys(rest).forEach(k => {
+    if (rest[k] !== null && rest[k] !== undefined) cleaned[k] = rest[k];
+  });
+  cleaned.created_at = cleaned.created_at || new Date().toISOString();
+  await setDoc(ref, cleaned);
+  return { id: docId, ...cleaned };
+}
+
+async function fbUpdate(coll, id, data) {
+  const ref = doc(db, coll, String(id));
+  const cleaned = {};
+  Object.keys(data).forEach(k => {
+    // undefined → ignore (Firestore-д хүлээж авдаггүй)
+    // null → Firestore хүлээж авдаг (field-ийг null болгоно)
+    if (data[k] !== undefined) {
+      cleaned[k] = data[k];
     }
-  }
-  throw lastError || new Error("Network error");
-}
-
-// === Concurrent Request Limiter ===
-// Нэг дор хэт олон хүсэлт явуулахаас сэргийлнэ
-// (Supabase Free tier 60 concurrent ~ багасгана)
-const _pendingRequests = new Set();
-const MAX_CONCURRENT = 4; // нэг дор max 4 хүсэлт явна
-const _queue = [];
-
-async function withConcurrencyLimit(fn) {
-  while (_pendingRequests.size >= MAX_CONCURRENT) {
-    await new Promise(res => {
-      _queue.push(res);
-    });
-  }
-  const id = Math.random();
-  _pendingRequests.add(id);
+  });
   try {
-    return await fn();
-  } finally {
-    _pendingRequests.delete(id);
-    const next = _queue.shift();
-    if (next) next();
+    await updateDoc(ref, cleaned);
+  } catch (e) {
+    // not-found бол setDoc хэрэглэнэ
+    await setDoc(ref, cleaned, { merge: true });
   }
+  return true;
 }
 
-async function supaSelect(table, query = "select=*") {
-  return withConcurrencyLimit(async () => {
-    try {
-      const r = await fetchWithRetry(`${SUPA_URL}/rest/v1/${table}?${query}`, {
-        headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
-      });
-      if (!r.ok) {
-        console.warn(`Supabase ${table}: ${r.status}`);
-        return [];
-      }
-      return await r.json();
-    } catch (e) {
-      console.warn(`Supabase ${table} error:`, e.message);
-      return [];
+async function fbDelete(coll, id) {
+  const ref = doc(db, coll, String(id));
+  await deleteDoc(ref);
+  return true;
+}
+
+async function fbWhere(coll, field, op, value) {
+  return fbSelect(coll, { where: [[field, op, value]] });
+}
+
+// ── BACKWARD COMPATIBILITY: Supabase нэрээр дуудах ──────
+// Хуучин код өөрчлөхгүйгээр шилжүүлэх
+const supaSelect = async (table, queryStr) => {
+  // queryStr-аас select= хэсгийг арилгах (Firebase-д хэрэггүй)
+  // ба email=eq.xxx эсвэл name=eq.yyy зэргийг parse хийх
+  if (!queryStr) return fbSelect(table);
+  // Параметрууд салгах
+  const conditions = [];
+  const parts = queryStr.split("&");
+  for (const p of parts) {
+    if (p.includes("=eq.")) {
+      const [field, valEnc] = p.split("=eq.");
+      const val = decodeURIComponent(valEnc);
+      conditions.push([field, "==", val]);
     }
-  });
-}
+  }
+  if (conditions.length > 0) {
+    return fbSelect(table, { where: conditions });
+  }
+  return fbSelect(table);
+};
 
-// ⚠️ ЧУХАЛ: INSERT/UPDATE/DELETE-д retry хийхгүй (davhar insert garahgui)
-async function supaInsert(table, body) {
-  return withConcurrencyLimit(async () => {
-    const r = await fetchWithTimeout(`${SUPA_URL}/rest/v1/${table}`, {
-      method: "POST", headers: supaHeaders(), body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      const errText = await r.text();
-      // Уникал constraint violation алдаа бол silent
-      if (r.status === 409 || errText.includes("duplicate")) {
-        throw new Error("Аль хэдийн нэмэгдсэн байна");
-      }
-      throw new Error(errText || `Error ${r.status}`);
-    }
-    return await r.json();
-  });
-}
-
-async function supaUpdate(table, id, body) {
-  return withConcurrencyLimit(async () => {
-    const r = await fetchWithTimeout(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
-      method: "PATCH", headers: supaHeaders(), body: JSON.stringify(body),
-    });
-    if (!r.ok) throw new Error(await r.text());
-    return r;
-  });
-}
-
-async function supaDelete(table, id) {
-  return withConcurrencyLimit(async () => {
-    await fetchWithTimeout(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
-      method: "DELETE", headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` },
-    });
-  });
-}
+const supaInsert = (table, body) => fbInsert(table, body);
+const supaUpdate = (table, id, body) => fbUpdate(table, id, body);
+const supaDelete = (table, id) => fbDelete(table, id);
 
 // ── СУУРЬ HELPERS ────────────────────────────────────────────────────
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -735,47 +732,77 @@ function AuthScreen({ onAuth }) {
       padding: 16, fontFamily: "system-ui", position: "relative", overflow: "hidden",
     }}>
       <style>{ANIMATIONS}</style>
-      {/* Floating emojis */}
+
+      {/* Animated background blobs */}
       <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-        {["🌸", "💖", "✨", "🌟", "💫"].map((e, i) => (
+        {/* Big blobs */}
+        <div className="k-float" style={{
+          position: "absolute", top: "-10%", left: "-10%",
+          width: 300, height: 300, borderRadius: "50%",
+          background: `radial-gradient(circle,${theme.bg1}55,transparent 70%)`,
+          animationDuration: "8s",
+        }} />
+        <div className="k-float" style={{
+          position: "absolute", bottom: "-15%", right: "-10%",
+          width: 350, height: 350, borderRadius: "50%",
+          background: `radial-gradient(circle,${theme.bg1}33,transparent 70%)`,
+          animationDuration: "10s", animationDelay: "1s",
+        }} />
+        {/* Floating emojis */}
+        {["🌸", "💖", "✨", "🌟", "💫", "🎨", "📚"].map((e, i) => (
           <div key={i} className="k-float" style={{
-            position: "absolute", left: `${10 + i * 20}%`, top: `${15 + (i % 3) * 25}%`,
-            fontSize: 36, opacity: 0.3, animationDelay: `${i * 0.4}s`,
+            position: "absolute", left: `${5 + i * 13}%`, top: `${10 + (i % 4) * 22}%`,
+            fontSize: 28 + (i % 3) * 8, opacity: 0.25, animationDelay: `${i * 0.5}s`,
+            animationDuration: `${5 + (i % 3) * 2}s`,
           }}>{e}</div>
         ))}
       </div>
 
       <div className="k-pop" style={{
-        background: "#fff", borderRadius: 24, padding: 24,
-        width: "100%", maxWidth: 380, position: "relative", zIndex: 1,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
+        background: "#fff", borderRadius: 28, padding: 28,
+        width: "100%", maxWidth: 400, position: "relative", zIndex: 1,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.5)",
+        backdropFilter: "blur(20px)",
       }}>
-        {/* Logo */}
+        {/* Header — Корея + Кандун */}
         <div style={{ textAlign: "center", marginBottom: 18 }}>
-          <div className="k-bounce" style={{ fontSize: 64, marginBottom: 6 }}>{theme.emoji}</div>
-          <div style={{ fontWeight: 900, fontSize: 22, color: "#1a1a2e" }}>한국어 학원</div>
-          <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>Кандун Their</div>
+          <div className="k-bounce" style={{ fontSize: 60, marginBottom: 8, lineHeight: 1 }}>{theme.emoji}</div>
+          <div style={{
+            fontWeight: 900, fontSize: 22, color: "#1a1a2e",
+            letterSpacing: "-0.5px", marginBottom: 2,
+          }}>한국어 학원</div>
+          <div style={{
+            fontSize: 13, fontWeight: 700,
+            background: `linear-gradient(135deg,${theme.bg1},${theme.bg2})`,
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+            marginTop: 2,
+          }}>🌸 Кандун University</div>
         </div>
 
         {/* Mode tabs — forgot үед нуух */}
         {mode !== "forgot" && (
-          <div style={{ display: "flex", background: "#f0f0f5", borderRadius: 12, padding: 3, marginBottom: 16 }}>
+          <div style={{ display: "flex", background: "#f5f5fa", borderRadius: 14, padding: 4, marginBottom: 16, gap: 2 }}>
             {[["teacher", "👩‍🏫 Багш"], ["student", "🎓 Сурагч"], ["register", "✏️ Бүртгэл"]].map(([m, label]) => (
               <button key={m} onClick={() => { setMode(m); setErr(""); }}
                 style={{
-                  flex: 1, padding: "8px 4px", borderRadius: 10, border: "none",
+                  flex: 1, padding: "9px 4px", borderRadius: 11, border: "none",
                   background: mode === m ? "#fff" : "transparent",
-                  color: mode === m ? theme.bg2 : "#888",
+                  color: mode === m ? theme.bg2 : "#999",
                   fontWeight: mode === m ? 800 : 600, fontSize: 11, cursor: "pointer",
-                  transition: "all .15s",
-                  boxShadow: mode === m ? "0 2px 6px rgba(0,0,0,0.08)" : "none",
+                  transition: "all .2s",
+                  boxShadow: mode === m ? `0 2px 8px ${theme.bg2}33, 0 0 0 1px ${theme.bg2}22` : "none",
                 }}>{label}</button>
             ))}
           </div>
         )}
 
-        <div style={{ textAlign: "center", marginBottom: 14, fontSize: 13, color: "#555", fontWeight: 600 }}>
-          {theme.sub}
+        <div style={{
+          textAlign: "center", marginBottom: 16, fontSize: 13,
+          color: "#666", fontWeight: 600,
+          padding: "8px 12px", background: `${theme.bg1}15`, borderRadius: 10,
+        }}>
+          ✨ {theme.sub}
         </div>
 
         {/* Form */}
@@ -892,10 +919,12 @@ function AuthScreen({ onAuth }) {
 
         {err && (
           <div className="k-pop" style={{
-            marginTop: 12, padding: "8px 12px",
-            background: err.startsWith("✅") ? "#e8f5e9" : "#ffebee",
+            marginTop: 14, padding: "10px 14px",
+            background: err.startsWith("✅") ? "#e8f5e9" : "#fff5f5",
             color: err.startsWith("✅") ? "#1b5e20" : "#c62828",
-            borderRadius: 10, fontSize: 12, textAlign: "center", fontWeight: 600,
+            border: `1.5px solid ${err.startsWith("✅") ? "#a5d6a7" : "#ffcdd2"}`,
+            borderRadius: 12, fontSize: 12, textAlign: "center", fontWeight: 700,
+            boxShadow: err.startsWith("✅") ? "0 4px 12px rgba(67,160,71,0.15)" : "0 4px 12px rgba(229,57,53,0.1)",
           }}>{err}</div>
         )}
       </div>
@@ -1802,9 +1831,10 @@ function HomeworkListModal({ cls, students, homeworks, submissions, isSuperAdmin
     const deleteHw = async () => {
       if (!window.confirm("Энэ даалгаврыг устгах уу?")) return;
       try {
-        const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` };
-        await fetch(`${SUPA_URL}/rest/v1/homework_submissions?homework_id=eq.${selHw.id}`, { method: "DELETE", headers: h });
-        await supaDelete("homeworks", selHw.id);
+        // Холбоотой submissions устгах
+        const subs = await fbWhere("homework_submissions", "homework_id", "==", selHw.id);
+        for (const sub of subs) await fbDelete("homework_submissions", sub.id);
+        await fbDelete("homeworks", selHw.id);
         onRefresh && onRefresh();
         onToast && onToast("✅ Устгагдлаа", "success");
         setSelHw(null);
@@ -2102,9 +2132,10 @@ function ExamRoomModal({ exam, cls, students, examSubmissions, isOwner, onClose,
   const deleteExam = async () => {
     if (!window.confirm("Шалгалтыг устгах уу?")) return;
     try {
-      const h = { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}` };
-      await fetch(`${SUPA_URL}/rest/v1/exam_submissions?exam_id=eq.${exam.id}`, { method: "DELETE", headers: h });
-      await supaDelete("exams", exam.id);
+      // Холбоотой submissions устгах
+      const subs = await fbWhere("exam_submissions", "exam_id", "==", exam.id);
+      for (const sub of subs) await fbDelete("exam_submissions", sub.id);
+      await fbDelete("exams", exam.id);
       onRefresh && onRefresh();
       onToast && onToast("✅ Устгагдлаа", "success");
       onClose();
@@ -4757,10 +4788,23 @@ export default function App() {
   const [showAllVocab, setShowAllVocab] = useState(false);
   const [loading, setLoading] = useState(!!user);
   const [toast, setToast] = useState(null);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   // New class form
   const [nc, setNc] = useState({ name: "", time: "", days: [], color: "#e91e8c" });
 
   const showToast = (msg, type) => setToast({ msg, type: type || "success" });
+
+  // Online/Offline detection
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); showToast("✅ Интернет холбогдлоо", "success"); };
+    const onOffline = () => { setIsOnline(false); showToast("📵 Интернет тасарсан — Offline горимд ажиллана", "warning"); };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
 
   // ── Load all data ─────────────
   const loadAll = useCallback(async (silent) => {
@@ -4807,7 +4851,53 @@ export default function App() {
     }
   }, []);
 
+  // ⚡ Эхлэх үед нэг удаа л дуудна — subscribe нь үлдсэн ачаалалд хариуцна
   useEffect(() => { if (user) loadAll(false); }, [user]);
+
+  // ⚡ REAL-TIME SUBSCRIBERS — Firebase онлайн өөрчлөлтийг шууд авна
+  // Багш үг нэмэхэд → сурагч шууд харна (refresh хэрэггүй)
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribers = [];
+
+    // Чухал collections-уудад onSnapshot listener тавьдаг
+    // Listener тус бүр өгөгдөл өөрчлөгдөнгүүт автомат state-ийг шинэчилнэ
+    const subscribe = (collName, setter, processor) => {
+      try {
+        const unsub = onSnapshot(
+          collection(db, collName),
+          (snapshot) => {
+            const docs = [];
+            snapshot.forEach(d => docs.push({ id: d.id, ...d.data() }));
+            setter(processor ? processor(docs) : docs);
+          },
+          (err) => console.warn(`Subscribe ${collName}:`, err.message)
+        );
+        unsubscribers.push(unsub);
+      } catch (e) {
+        console.warn(`Could not subscribe to ${collName}:`, e.message);
+      }
+    };
+
+    subscribe("classes", setClasses);
+    subscribe("students", setStudents, (docs) => docs.map(s => ({
+      ...s,
+      attendance: s.attendance && typeof s.attendance === "object" ? s.attendance : {},
+      badges: Array.isArray(s.badges) ? s.badges : [],
+      weak_words: Array.isArray(s.weak_words) ? s.weak_words : [],
+    })));
+    subscribe("vocab_entries", setVocabEntries);
+    subscribe("homeworks", setHomeworks);
+    subscribe("homework_submissions", setHomeworkSubs);
+    subscribe("exams", setExams);
+    subscribe("exam_submissions", setExamSubs);
+    subscribe("pending_students", setPending);
+
+    // Cleanup — компонент unmount хийгдэхэд listeners-ийг хаах
+    return () => unsubscribers.forEach(unsub => {
+      try { unsub(); } catch (e) {}
+    });
+  }, [user]);
 
   // Auto-refresh when visible
   useEffect(() => {
@@ -4937,7 +5027,27 @@ export default function App() {
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 18, color: "#1a1a2e" }}>🌸 Кандун</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: "#1a1a2e", display: "flex", alignItems: "center", gap: 8 }}>
+              🌸 Кандун
+              {/* Real-time / Offline indicator */}
+              {isOnline ? (
+                <span title="Шууд холбогдсон — багш үг нэмэхэд сурагч шууд харна" style={{
+                  display: "inline-flex", alignItems: "center", gap: 3,
+                  background: "#e8f5e9", color: "#1b5e20",
+                  padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 800,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#43a047", display: "inline-block" }} className="k-pulse" />
+                  LIVE
+                </span>
+              ) : (
+                <span title="Интернет тасарсан — хадгалсан мэдээллээр ажиллана" style={{
+                  background: "#fff3e0", color: "#e65100",
+                  padding: "2px 8px", borderRadius: 10, fontSize: 9, fontWeight: 800,
+                }}>
+                  📵 OFFLINE
+                </span>
+              )}
+            </div>
             <div style={{ fontSize: 11, color: "#888" }}>
               {isSuperAdmin ? "👑 Сүпэр админ" : "👩‍🏫 Багш"} · {user.displayName}
             </div>
