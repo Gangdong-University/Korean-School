@@ -181,18 +181,54 @@ function pickBestKrVoice() {
 }
 
 function speakKr(text) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    return;
+  }
+  if (!text || !text.trim()) return;
+  try {
+    // iOS Safari дээр заримдаа speaking үед cancel хийхгүй бол гацдаг
+    window.speechSynthesis.cancel();
+
+    // Voice list бэлэн эсэхийг шалгах — iOS дээр заримдаа хоцордог
+    let voices = window.speechSynthesis.getVoices();
+    if (!voices || voices.length === 0) {
+      // Voice ачаалагдаагүй байна — дахин ачаалуулаад түр хүлээгээд speak хийнэ
+      window.speechSynthesis.getVoices();
+      setTimeout(() => speakKrNow(text), 250);
+      return;
+    }
+    speakKrNow(text);
+  } catch (e) {
+    console.warn("TTS error:", e);
+  }
+}
+
+function speakKrNow(text) {
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "ko-KR";
-    u.rate = 0.92;     // Жижигхэн удаан
-    u.pitch = 1.05;    // Бага зэрэг өндөр (эмэгтэй хоолойтой ойролцоо)
+    u.rate = 0.85;     // Арай удаан — тод дуудлага
+    u.pitch = 1.0;     // Байгалийн өндөр
     u.volume = 1.0;
     if (!_krVoice) _krVoice = pickBestKrVoice();
     if (_krVoice) u.voice = _krVoice;
+
+    // iOS Safari fix — resume() дуудах
+    u.onstart = () => {
+      try { window.speechSynthesis.resume(); } catch (e) {}
+    };
     window.speechSynthesis.speak(u);
-  } catch (e) {}
+
+    // iOS Safari заримдаа "paused" төлөвт ордог — resume хийнэ
+    setTimeout(() => {
+      try {
+        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+      } catch (e) {}
+    }, 100);
+  } catch (e) {
+    console.warn("TTS error:", e);
+  }
 }
 
 // Voice list бэлэн болоход дахин сонгоно
@@ -384,7 +420,111 @@ async function generateSentence(word, meaning, level = 0) {
   } catch (e) { return null; }
 }
 
-// ── ТЕМ (Themes) ─────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// 🏗️ TEMPLATE-BASED ӨГҮҮЛБЭР ЗОХИОГЧ (AI-гүй, вэбсайт дотроо)
+// ═══════════════════════════════════════════════════════════════════
+// Өгүүлбэрийн бүтэц: parts = [{ t: "текст", word?: "шинэ үг", mean?: "утга" }]
+// word талбартай хэсэг = шинэ үг (тодруулж, доор нь монгол утга харагдана)
+
+const GRAMMAR_PATTERNS = [
+  {
+    keys: ["이에요", "예요", "입니다", "이다"],
+    name: "~이다 (юм/байх)",
+    build: (w, m) => ({ parts: [{ t: "이것은 " }, { t: w, word: w, mean: m }, { t: "이에요." }], mn: `Энэ бол ${m}.` }),
+  },
+  {
+    keys: ["을", "를", "목적어"],
+    name: "~을/를 (-ийг)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "을/를 좋아해요." }], mn: `Би ${m}-д дуртай.` }),
+  },
+  {
+    keys: ["이", "가", "주어"],
+    name: "~이/가 (-нь)",
+    build: (w, m) => ({ parts: [{ t: w, word: w, mean: m }, { t: "이/가 있어요." }], mn: `${m} байна.` }),
+  },
+  {
+    keys: ["에", "장소", "위치"],
+    name: "~에 (-д/т)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "에 가요." }], mn: `Би ${m} руу явна.` }),
+  },
+  {
+    keys: ["에서", "출발"],
+    name: "~에서 (-аас/оос)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "에서 왔어요." }], mn: `Би ${m}-аас ирсэн.` }),
+  },
+  {
+    keys: ["와", "과", "하고", "그리고"],
+    name: "~와/과 (-тай хамт)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "와/과 같이 가요." }], mn: `Би ${m}-тай хамт явна.` }),
+  },
+  {
+    keys: ["고 싶", "want", "хүсэх"],
+    name: "~고 싶다 (-хийхийг хүсэх)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "을/를 보고 싶어요." }], mn: `Би ${m}-ийг харахыг хүсэж байна.` }),
+  },
+  {
+    keys: ["있", "보유", "байгаа"],
+    name: "~이 있다 (байх)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "이/가 있어요." }], mn: `Надад ${m} байгаа.` }),
+  },
+  {
+    keys: ["없", "хомс"],
+    name: "~이 없다 (байхгүй)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "이/가 없어요." }], mn: `Надад ${m} байхгүй.` }),
+  },
+  {
+    keys: ["아요", "어요", "현재"],
+    name: "~аё/어요 (одоо цаг)",
+    build: (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "을/를 봐요." }], mn: `Би ${m}-ийг харж байна.` }),
+  },
+  {
+    keys: ["았", "었", "과거"],
+    name: "~았/었어요 (өнгөрсөн цаг)",
+    build: (w, m) => ({ parts: [{ t: "어제 " }, { t: w, word: w, mean: m }, { t: "을/를 봤어요." }], mn: `Өчигдөр ${m}-ийг харсан.` }),
+  },
+  {
+    keys: ["겠", "ㄹ 거", "미래"],
+    name: "~겠어요 (ирээдүй)",
+    build: (w, m) => ({ parts: [{ t: "내일 " }, { t: w, word: w, mean: m }, { t: "을/를 살 거예요." }], mn: `Маргааш ${m} худалдаж авна.` }),
+  },
+];
+
+const SIMPLE_TEMPLATES = [
+  (w, m) => ({ parts: [{ t: "이것은 " }, { t: w, word: w, mean: m }, { t: "이에요." }], mn: `Энэ бол ${m}.` }),
+  (w, m) => ({ parts: [{ t: "저는 " }, { t: w, word: w, mean: m }, { t: "을/를 좋아해요." }], mn: `Би ${m}-д дуртай.` }),
+  (w, m) => ({ parts: [{ t: w, word: w, mean: m }, { t: "이/가 있어요." }], mn: `${m} байна.` }),
+  (w, m) => ({ parts: [{ t: "이것은 " }, { t: w, word: w, mean: m }, { t: "입니다." }], mn: `Энэ бол ${m} юм.` }),
+  (w, m) => ({ parts: [{ t: w, word: w, mean: m }, { t: "을/를 주세요." }], mn: `${m}-ийг өгөөч.` }),
+];
+
+function buildSentenceFromTemplate(word, meaning, grammar = null) {
+  if (grammar && grammar.word) {
+    const gWord = grammar.word.toLowerCase();
+    for (const p of GRAMMAR_PATTERNS) {
+      if (p.keys.some(k => gWord.includes(k.toLowerCase()))) {
+        const sentence = p.build(word, meaning);
+        return { ...sentence, grammarName: grammar.word, grammarMeaning: grammar.meaning };
+      }
+    }
+    const idx = Math.abs(hashCode(word)) % SIMPLE_TEMPLATES.length;
+    const s = SIMPLE_TEMPLATES[idx](word, meaning);
+    return { ...s, grammarName: grammar.word, grammarMeaning: grammar.meaning };
+  }
+  const idx = Math.abs(hashCode(word)) % SIMPLE_TEMPLATES.length;
+  return SIMPLE_TEMPLATES[idx](word, meaning);
+}
+
+function hashCode(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
+
+
 const THEMES = [
   { id: "sakura", name: "🌸 Sakura", bg: "#fff0f5", card: "#ffe4ef", accent: "#e91e8c", text: "#4a0028", soft: "#ffd6e8", border: "#f48cb1", emoji: "🌸" },
   { id: "sky", name: "☁️ Sky", bg: "#e8f4fd", card: "#d0eaff", accent: "#2196f3", text: "#0d2137", soft: "#b3d9ff", border: "#64b5f6", emoji: "☁️" },
@@ -971,6 +1111,7 @@ function AuthScreen({ onAuth }) {
 function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) {
   const [filter, setFilter] = useState("all"); // all | vocab | grammar
   const [sortBy, setSortBy] = useState("date_desc"); // date_desc | date_asc
+  const [search, setSearch] = useState("");
 
   // Бүх үгсийг өдрөөр group хийх
   const grouped = useMemo(() => {
@@ -979,6 +1120,14 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
       if (filter === "grammar") return v.type === "grammar";
       return true;
     });
+    // Хайлт — солонгос ба монгол хоёуланд
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      filtered = filtered.filter(v =>
+        (v.word || "").toLowerCase().includes(q) ||
+        (v.meaning || "").toLowerCase().includes(q)
+      );
+    }
     // Group by date
     const map = {};
     filtered.forEach(v => {
@@ -990,10 +1139,11 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
     const dates = Object.keys(map).sort();
     if (sortBy === "date_desc") dates.reverse();
     return dates.map(d => ({ date: d, items: map[d] }));
-  }, [vocabEntries, filter, sortBy]);
+  }, [vocabEntries, filter, sortBy, search]);
 
   const totalVocab = vocabEntries.filter(v => v.type !== "grammar").length;
   const totalGrammar = vocabEntries.filter(v => v.type === "grammar").length;
+  const searchResultCount = grouped.reduce((sum, g) => sum + g.items.length, 0);
 
   const wordStatus = (word) => {
     const wk = weakWords.find(w => (typeof w === "string" ? w : w.word) === word);
@@ -1074,6 +1224,22 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
           🖨️ Хэвлэх
         </button>
       </div>
+
+      {/* Хайлт */}
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="🔍 Үг хайх (солонгос эсвэл монгол)..."
+          style={{ ...INP, paddingLeft: 14, fontSize: 13 }} />
+        {search && (
+          <button onClick={() => setSearch("")}
+            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "#eee", border: "none", borderRadius: "50%", width: 22, height: 22, cursor: "pointer", fontSize: 12, color: "#666" }}>✕</button>
+        )}
+      </div>
+      {search && (
+        <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 8 }}>
+          🔍 {searchResultCount} илэрц олдлоо
+        </div>
+      )}
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 5, marginBottom: 10, background: t.soft, borderRadius: 10, padding: 3 }}>
@@ -2249,12 +2415,76 @@ function ExamRoomModal({ exam, cls, students, examSubmissions, isOwner, onClose,
           </div>
         </div>
       )}
+
+      {/* 📊 ШАЛГАЛТЫН СТАТИСТИК — finished статусанд */}
+      {exam.status === "finished" && sortedSubs.length > 0 && (() => {
+        // Average score
+        const avgScore = Math.round(sortedSubs.reduce((sum, s) => sum + (s.score || 0), 0) / sortedSubs.length);
+        // Хамгийн их алдаа хийсэн асуултууд
+        const questionStats = {}; // { idx: { question, wrong_count, total_count, wrongUsers: [] } }
+        sortedSubs.forEach(sub => {
+          (sub.detailed_results || []).forEach(r => {
+            const key = r.idx;
+            if (!questionStats[key]) {
+              questionStats[key] = { idx: r.idx, question: r.question, correctAnswer: r.correctAnswer, wrong_count: 0, total: 0 };
+            }
+            questionStats[key].total++;
+            if (!r.isCorrect) questionStats[key].wrong_count++;
+          });
+        });
+        const sortedStats = Object.values(questionStats).sort((a, b) => b.wrong_count - a.wrong_count).slice(0, 5);
+
+        return (
+          <div style={{ marginTop: 14, background: "#fff5f5", borderRadius: 12, padding: 12, border: "1px solid #ffcdd2" }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: "#c62828", marginBottom: 8 }}>📊 Статистик</div>
+
+            {/* Дундаж оноо + хувь */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
+              <div style={{ background: "#fff", borderRadius: 8, padding: 8, textAlign: "center", border: "1px solid #ffcdd2" }}>
+                <div style={{ fontSize: 9, color: "#888", fontWeight: 700 }}>ДУНДАЖ</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: avgScore >= 70 ? "#43a047" : avgScore >= 50 ? "#f57c00" : "#c62828" }}>{avgScore}%</div>
+              </div>
+              <div style={{ background: "#fff", borderRadius: 8, padding: 8, textAlign: "center", border: "1px solid #ffcdd2" }}>
+                <div style={{ fontSize: 9, color: "#888", fontWeight: 700 }}>ХАМГИЙН ӨНДӨР</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#43a047" }}>{sortedSubs[0]?.score || 0}%</div>
+              </div>
+              <div style={{ background: "#fff", borderRadius: 8, padding: 8, textAlign: "center", border: "1px solid #ffcdd2" }}>
+                <div style={{ fontSize: 9, color: "#888", fontWeight: 700 }}>ХАМГИЙН БАГА</div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: "#c62828" }}>{sortedSubs[sortedSubs.length - 1]?.score || 0}%</div>
+              </div>
+            </div>
+
+            {/* Хамгийн их алдаа хийсэн асуултууд */}
+            {sortedStats.length > 0 && sortedStats[0].wrong_count > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#c62828", marginBottom: 6 }}>❌ Хамгийн их алдаа хийсэн асуултууд</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {sortedStats.filter(s => s.wrong_count > 0).slice(0, 3).map(s => {
+                    const wrongPercent = Math.round((s.wrong_count / s.total) * 100);
+                    return (
+                      <div key={s.idx} style={{ background: "#fff", borderRadius: 8, padding: 8, fontSize: 11, border: "1px solid #ffe0e0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                          <span style={{ fontWeight: 700, color: "#1a1a2e" }}>#{s.idx}. {(s.question || "").slice(0, 40)}{s.question?.length > 40 ? "..." : ""}</span>
+                          <span style={{ fontWeight: 900, color: "#c62828" }}>{wrongPercent}%</span>
+                        </div>
+                        <div style={{ color: "#888", fontSize: 10 }}>
+                          {s.wrong_count}/{s.total} хүүхэд алдсан · Зөв хариу: <b style={{ color: "#43a047" }}>{s.correctAnswer}</b>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </Overlay>
   );
 }
 
 // ── StudentExamScreen (Сурагч шалгалт өгөх) ──────────────────
-function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onClose }) {
+function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onClose, previousSubmissions = [] }) {
   const [stage, setStage] = useState("loading");
   const [questions, setQuestions] = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
@@ -2312,15 +2542,35 @@ function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onClose
     const total = questions.length;
     const score = total > 0 ? Math.round((correct / total) * 100) : 0;
     const xpEarned = correct * (exam.xp_per_correct || 5);
+
+    // Дэлгэрэнгүй үр дүн — алдсан асуултуудыг хадгалах
+    const detailedResults = questions.map((q, i) => {
+      const userAns = (answers[i] || "").toString().trim();
+      const correctAns = (q.correct || "").toString().trim();
+      const isCorrect = userAns.toLowerCase() === correctAns.toLowerCase() ||
+        (Array.isArray(q.alternatives) && q.alternatives.map(x => x.toString().trim().toLowerCase()).includes(userAns.toLowerCase()));
+      return {
+        idx: i + 1,
+        question: q.question || "",
+        type: q.type || "",
+        audio: q.audio || "",
+        userAnswer: userAns,
+        correctAnswer: correctAns,
+        isCorrect,
+      };
+    });
+
     try {
       await supaInsert("exam_submissions", {
         id: `es${Date.now()}`, exam_id: exam.id, student_id: student.id,
         answers, correct_count: correct, total_count: total, score, xp_earned: xpEarned,
+        detailed_results: detailedResults,
+        submitted_at: new Date().toISOString(),
       });
       const newXp = (student.xp || 0) + xpEarned;
       await supaUpdate("students", student.id, { xp: newXp });
     } catch (e) { console.error("Exam submit err", e); }
-    setResult({ correct, total, score, xpEarned, timeOut });
+    setResult({ correct, total, score, xpEarned, timeOut, detailedResults });
     setStage("done");
     if (onComplete) onComplete({ score, xpEarned });
   };
@@ -2343,22 +2593,80 @@ function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onClose
   if (stage === "done" && result) {
     const isGreat = result.score >= 80;
     const isGood = result.score >= 60;
+    // Өмнөх submissions-аас энэ сурагчийнхыг олох (хамгийн сүүлийнхыг)
+    const prevSubs = (previousSubmissions || []).filter(s => s.student_id === student.id).sort((a, b) => (b.submitted_at || "").localeCompare(a.submitted_at || ""));
+    const lastSub = prevSubs[0]; // Хамгийн сүүлийн өмнөх submission
+    const scoreChange = lastSub ? result.score - (lastSub.score || 0) : null;
+    const wrongResults = (result.detailedResults || []).filter(r => !r.isCorrect);
+
     return (
-      <div style={{ minHeight: "100vh", background: t.bg, padding: 16, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto" }}>
-        <div className="k-pop" style={{ background: "#fff", borderRadius: 22, padding: 26, textAlign: "center", border: `2px solid ${t.border}`, marginTop: 30 }}>
+      <div style={{ minHeight: "100vh", background: t.bg, padding: 16, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto", paddingBottom: 30 }}>
+        <div className="k-pop" style={{ background: "#fff", borderRadius: 22, padding: 26, textAlign: "center", border: `2px solid ${t.border}`, marginTop: 20 }}>
           <div className="k-bounce" style={{ fontSize: 80, marginBottom: 12 }}>{isGreat ? "🏆" : isGood ? "🎉" : "💪"}</div>
           <div style={{ fontWeight: 900, fontSize: 24, color: t.accent, marginBottom: 6 }}>{isGreat ? "Гайхалтай!" : isGood ? "Сайн!" : "Хичээ!"}</div>
           {result.timeOut && <div style={{ background: "#fff3cd", color: "#b8860b", padding: "4px 12px", borderRadius: 8, fontSize: 11, fontWeight: 700, display: "inline-block", marginBottom: 10 }}>⏰ Хугацаа дууссан</div>}
-          <div style={{ background: `linear-gradient(135deg,${t.accent},${t.accent}cc)`, borderRadius: 16, padding: 20, marginBottom: 14 }}>
+          <div style={{ background: `linear-gradient(135deg,${t.accent},${t.accent}cc)`, borderRadius: 16, padding: 20, marginBottom: 10 }}>
             <div style={{ color: "#fff", fontSize: 13, opacity: .9, fontWeight: 700 }}>ОНОО</div>
             <div style={{ color: "#fff", fontSize: 50, fontWeight: 900, lineHeight: 1, marginTop: 4 }}>{result.score}<span style={{ fontSize: 24 }}>/100</span></div>
             <div style={{ color: "#fff", fontSize: 13, opacity: .9, marginTop: 8 }}>{result.correct} зөв / {result.total} нийт</div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 800, marginTop: 10, background: "rgba(255,255,255,0.2)", borderRadius: 10, padding: "6px 12px", display: "inline-block" }}>+{result.xpEarned} XP</div>
           </div>
-          <button onClick={onClose} style={{ ...btn(t.accent, "#fff"), width: "100%", justifyContent: "center", padding: 12, fontSize: 14, boxShadow: `0 4px 0 ${t.border}` }}>
-            ✅ Дуусгах
-          </button>
+
+          {/* 📊 Өмнөх оноотой харьцуулах */}
+          {lastSub && (
+            <div className="k-fade" style={{ background: "#f5f0ff", borderRadius: 12, padding: 10, marginBottom: 12, fontSize: 11, color: "#666" }}>
+              <div style={{ fontWeight: 700, marginBottom: 3 }}>📊 Өмнөх шалгалт</div>
+              <div>Өмнөх оноо: <b style={{ color: "#7c3aed" }}>{lastSub.score}/100</b></div>
+              {scoreChange !== null && scoreChange !== 0 && (
+                <div style={{ marginTop: 3, fontWeight: 700, color: scoreChange > 0 ? "#43a047" : "#e53935" }}>
+                  {scoreChange > 0 ? `📈 +${scoreChange} оноогоор сайжирлаа!` : `📉 ${scoreChange} оноогоор буурлаа`}
+                </div>
+              )}
+              {scoreChange === 0 && <div style={{ marginTop: 3, color: "#999" }}>↔️ Адил оноо</div>}
+            </div>
+          )}
         </div>
+
+        {/* ❌ АЛДСАН АСУУЛТУУД */}
+        {wrongResults.length > 0 && (
+          <div className="k-fade" style={{ background: "#fff", borderRadius: 16, padding: 16, marginTop: 12, border: "2px solid #ffcdd2" }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: "#c62828", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+              ❌ Алдсан асуултууд ({wrongResults.length})
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {wrongResults.map((r, i) => (
+                <div key={i} style={{ background: "#fff5f5", borderRadius: 10, padding: 10, fontSize: 12 }}>
+                  <div style={{ fontSize: 10, color: "#888", marginBottom: 3 }}>Асуулт #{r.idx}</div>
+                  <div style={{ fontWeight: 700, color: "#1a1a2e", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                    {r.audio && (
+                      <button onClick={() => speakKr(r.audio)} style={{ background: "#1976d2", color: "#fff", border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontWeight: 700 }}>
+                        🔊
+                      </button>
+                    )}
+                    {r.question}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+                    <div style={{ background: "#ffcdd2", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
+                      <span style={{ color: "#c62828", fontWeight: 700 }}>❌ Таны хариу: </span>
+                      <span style={{ color: "#1a1a2e" }}>{r.userAnswer || "(хариулаагүй)"}</span>
+                    </div>
+                    <div style={{ background: "#c8e6c9", padding: "4px 8px", borderRadius: 6, fontSize: 11 }}>
+                      <span style={{ color: "#2e7d32", fontWeight: 700 }}>✅ Зөв хариу: </span>
+                      <span style={{ color: "#1a1a2e", fontWeight: 700 }}>{r.correctAnswer}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "#888", marginTop: 10, textAlign: "center", fontStyle: "italic" }}>
+              💡 Эдгээр үгсийг сайн давтаарай!
+            </div>
+          </div>
+        )}
+
+        <button onClick={onClose} style={{ ...btn(t.accent, "#fff"), width: "100%", justifyContent: "center", padding: 12, fontSize: 14, boxShadow: `0 4px 0 ${t.border}`, marginTop: 12 }}>
+          ✅ Дуусгах
+        </button>
       </div>
     );
   }
@@ -2662,103 +2970,113 @@ function ListeningExercise({ current, t, userAnswer, setUserAnswer, showResult, 
 
 // ── SentenceExercise — Үгийг өгүүлбэрт оруулж бэлдэх ─────────────
 function SentenceExercise({ current, t, showResult, onSubmit }) {
-  const [sentence, setSentence] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [showAnswer, setShowAnswer] = useState(false);
-  const [selected, setSelected] = useState(null);
+  const [tappedWord, setTappedWord] = useState(null); // дарсан шинэ үг {word, mean}
 
-  useEffect(() => {
-    setLoading(true); setShowAnswer(false); setSelected(null);
-    generateSentence(current.target.word, current.target.meaning, current.level || 0)
-      .then(data => {
-        if (data && data.kr && data.mn) {
-          setSentence(data);
-        } else {
-          // Fallback — энгийн жишээ
-          setSentence({
-            kr: `이것은 ${current.target.word}입니다.`,
-            mn: `Энэ нь ${current.target.meaning} юм.`,
-          });
-        }
-        setLoading(false);
-      });
-    // Audio play
-    const tm = setTimeout(() => speakKr(current.target.word), 400);
-    return () => clearTimeout(tm);
+  // Template-аар өгүүлбэр зохиох (AI-гүй) — синхрон, түргэн
+  const sentence = useMemo(() => {
+    return buildSentenceFromTemplate(
+      current.target.word,
+      current.target.meaning,
+      current.grammar || null
+    );
   }, [current]);
 
-  // Highlight target word in sentence
-  const highlightWord = (text, word) => {
-    if (!text || !word) return text;
-    const parts = text.split(word);
-    return parts.map((part, i) => (
-      <span key={i}>
-        {part}
-        {i < parts.length - 1 && (
-          <span style={{
-            background: "#fff3cd", color: "#b8860b", padding: "1px 6px",
-            borderRadius: 6, fontWeight: 900, border: "1px solid #ffc107",
-          }}>{word}</span>
-        )}
-      </span>
-    ));
-  };
+  useEffect(() => {
+    setShowAnswer(false);
+    setTappedWord(null);
+    // Бүх өгүүлбэрийг уншина
+    const krText = sentence.parts.map(p => p.t).join("");
+    const tm = setTimeout(() => speakKr(krText), 400);
+    return () => clearTimeout(tm);
+  }, [current, sentence]);
 
-  if (loading) {
-    return (
-      <div style={{ background: "#fff", borderRadius: 18, padding: "40px 20px", textAlign: "center", border: `2px solid ${t.border}` }}>
-        <div className="k-bounce" style={{ fontSize: 36, marginBottom: 8 }}>✍️</div>
-        <div style={{ fontSize: 13, color: t.text, opacity: .7 }}>Өгүүлбэр бэлдэж байна...</div>
-      </div>
-    );
-  }
+  const krFull = sentence.parts.map(p => p.t).join("");
 
   return (
     <div key={current.target.word}>
       {/* Target word card */}
-      <div style={{ background: "#fff", borderRadius: 18, padding: "20px 16px", textAlign: "center", marginBottom: 12, border: `2px solid ${t.border}` }}>
+      <div style={{ background: "#fff", borderRadius: 18, padding: "16px", textAlign: "center", marginBottom: 12, border: `2px solid ${t.border}` }}>
         <div style={{ fontSize: 11, opacity: .6, fontWeight: 700, marginBottom: 6 }}>ШИНЭ ҮГ</div>
-        <div style={{ fontSize: 32, fontWeight: 900, color: t.text, marginBottom: 4 }}>{current.target.word}</div>
+        <div style={{ fontSize: 30, fontWeight: 900, color: t.text, marginBottom: 4 }}>{current.target.word}</div>
         <div style={{ fontSize: 13, color: t.text, opacity: .65 }}>{current.target.meaning}</div>
-        <button onClick={() => speakKr(current.target.word)}
-          style={{ marginTop: 8, background: t.soft, color: t.accent, border: "none", borderRadius: 10, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
-          🔊 Сонсох
-        </button>
+        {/* Дүрэм харуулах */}
+        {sentence.grammarName && (
+          <div style={{ marginTop: 8, display: "inline-block", background: "#f3e5f5", color: "#7c3aed", padding: "4px 12px", borderRadius: 10, fontSize: 11, fontWeight: 700 }}>
+            📖 Дүрэм: {sentence.grammarName} {sentence.grammarMeaning ? `(${sentence.grammarMeaning})` : ""}
+          </div>
+        )}
+        <div>
+          <button onClick={() => speakKr(current.target.word)}
+            style={{ marginTop: 8, background: t.soft, color: t.accent, border: "none", borderRadius: 10, padding: "6px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+            🔊 Үг сонсох
+          </button>
+        </div>
       </div>
 
-      {/* Sentence card */}
+      {/* Sentence card — parts бүтэцтэй, шинэ үг дарвал утга гарна */}
       <div style={{ background: `linear-gradient(135deg,${t.soft},#fff)`, borderRadius: 18, padding: 16, marginBottom: 12, border: `2px solid ${t.border}` }}>
-        <div style={{ fontSize: 11, color: t.accent, fontWeight: 800, marginBottom: 8, letterSpacing: 1 }}>✍️ ӨГҮҮЛБЭР</div>
-        <div onClick={() => speakKr(sentence.kr)} style={{ cursor: "pointer", marginBottom: 10 }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.6 }}>
-            {highlightWord(sentence.kr, current.target.word)}
-          </div>
-          <div style={{ fontSize: 10, color: t.accent, opacity: .6, marginTop: 4 }}>👆 Дарж сонсох</div>
+        <div style={{ fontSize: 11, color: t.accent, fontWeight: 800, marginBottom: 10, letterSpacing: 1 }}>✍️ ӨГҮҮЛБЭР</div>
+
+        {/* Солонгос өгүүлбэр — үг бүр tap хийж болно */}
+        <div style={{ fontSize: 19, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.8, marginBottom: 8 }}>
+          {sentence.parts.map((p, i) => {
+            if (p.word) {
+              // Шинэ үг — тодруулсан, дарж болно
+              return (
+                <span key={i} onClick={() => {
+                  setTappedWord(tappedWord?.word === p.word ? null : { word: p.word, mean: p.mean });
+                  speakKr(p.word);
+                }} style={{
+                  background: "#fff3cd", color: "#b8860b", padding: "2px 8px",
+                  borderRadius: 8, fontWeight: 900, border: "2px solid #ffc107",
+                  cursor: "pointer", margin: "0 2px", display: "inline-block",
+                }}>{p.t}</span>
+              );
+            }
+            return <span key={i}>{p.t}</span>;
+          })}
         </div>
+
+        {/* Дарсан шинэ үгийн утга */}
+        {tappedWord && (
+          <div className="k-fade" style={{ background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 10, padding: "8px 12px", marginBottom: 8, fontSize: 13 }}>
+            <span style={{ fontWeight: 900, color: "#b8860b" }}>{tappedWord.word}</span>
+            <span style={{ color: "#666" }}> = {tappedWord.mean}</span>
+            <span style={{ fontSize: 10, color: "#999", marginLeft: 6 }}>(анхны хэлбэр)</span>
+          </div>
+        )}
+
+        <button onClick={() => speakKr(krFull)}
+          style={{ background: t.accent, color: "#fff", border: "none", borderRadius: 10, padding: "6px 14px", fontSize: 12, cursor: "pointer", fontWeight: 700, marginBottom: 4 }}>
+          🔊 Бүх өгүүлбэр сонсох
+        </button>
+        <div style={{ fontSize: 10, color: t.accent, opacity: .6, marginTop: 4 }}>💡 Шар үг дээр дарж утга, дуудлагыг үзээрэй</div>
+
         {showAnswer && (
-          <div className="k-fade" style={{ borderTop: `1px solid ${t.border}`, paddingTop: 10, fontSize: 14, color: "#555", lineHeight: 1.5 }}>
-            <span style={{ fontSize: 10, color: t.accent, fontWeight: 700 }}>📝 ОРЧУУЛГА:</span>
-            <div style={{ marginTop: 4 }}>{sentence.mn}</div>
+          <div className="k-fade" style={{ borderTop: `1px solid ${t.border}`, paddingTop: 10, marginTop: 10, fontSize: 14, color: "#555", lineHeight: 1.5 }}>
+            <span style={{ fontSize: 10, color: t.accent, fontWeight: 700 }}>📝 МОНГОЛ ОРЧУУЛГА:</span>
+            <div style={{ marginTop: 4, fontWeight: 600 }}>{sentence.mn}</div>
           </div>
         )}
       </div>
 
       {/* Buttons */}
-      {!showAnswer ? (
+      {!showAnswer && (
         <button onClick={() => setShowAnswer(true)}
           style={{ width: "100%", padding: 12, borderRadius: 14, border: "none", background: t.soft, color: t.accent, fontWeight: 800, fontSize: 13, cursor: "pointer", marginBottom: 8 }}>
-          💡 Орчуулга харах
+          💡 Бүтэн орчуулга харах
         </button>
-      ) : null}
+      )}
 
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={() => onSubmit(false)}
           style={{ flex: 1, background: "#ffcdd2", color: "#c62828", border: "none", borderRadius: 14, padding: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", boxShadow: "0 3px 0 #ef9a9a" }}>
-          😅 Ойлгохгүй
+          😅 Дахин үзэх
         </button>
         <button onClick={() => onSubmit(true)}
           style={{ flex: 1, background: "#c8e6c9", color: "#2e7d32", border: "none", borderRadius: 14, padding: 12, fontWeight: 800, fontSize: 13, cursor: "pointer", boxShadow: "0 3px 0 #a5d6a7" }}>
-          ✅ Ойлгож байна
+          ✅ Ойлгосон
         </button>
       </div>
     </div>
@@ -2780,6 +3098,8 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
   const [lostItem, setLostItem] = useState(false);
   const [selectedDate, setSelectedDate] = useState("all"); // "all" эсвэл "YYYY-MM-DD"
   const [missedWords, setMissedWords] = useState([]); // алдсан үгсийн жагсаалт
+  const [selectedGrammar, setSelectedGrammar] = useState(null); // sentence дасгалд сонгосон дүрэм
+  const [showGrammarPick, setShowGrammarPick] = useState(false); // дүрэм сонгох popup
 
   // Бүх боломжит өдрүүд
   const availableDates = useMemo(() => {
@@ -2819,6 +3139,11 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
           : [...distractors.map(d => d.meaning), target.meaning].sort(() => Math.random() - 0.5);
         return { target, options };
       }));
+    } else if (type === "sentence") {
+      // Зөвхөн vocab (дүрэм биш) ашиглаж, сонгосон дүрмийг хослуулна
+      let vocabOnly = selected.filter(w => w.type !== "grammar");
+      if (vocabOnly.length === 0) vocabOnly = selected; // fallback
+      setItems(vocabOnly.map(target => ({ target, grammar: selectedGrammar })));
     } else {
       setItems(selected.map(target => ({ target })));
     }
@@ -2928,7 +3253,14 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             {exerciseTypes.map((ex, i) => (
-              <div key={ex.id} onClick={() => startExercise(ex.id)} className="k-press"
+              <div key={ex.id} onClick={() => {
+                // Sentence дасгалд → эхлээд дүрэм сонгох цонх
+                if (ex.id === "sentence") {
+                  setShowGrammarPick(true);
+                } else {
+                  startExercise(ex.id);
+                }
+              }} className="k-press"
                 style={{
                   background: "#fff", borderRadius: 16, padding: 14,
                   border: `2px solid ${ex.color}33`, borderTop: `4px solid ${ex.color}`,
@@ -2945,6 +3277,58 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
         <div style={{ textAlign: "center", marginTop: 20, fontSize: 11, color: t.text, opacity: .5 }}>
           🌸 화이팅! Чадна!
         </div>
+
+        {/* 📖 ДҮРЭМ СОНГОХ POPUP (sentence дасгалд) */}
+        {showGrammarPick && (
+          <Overlay onClose={() => setShowGrammarPick(false)} maxW={420}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 24 }}>✍️</span> Өгүүлбэр зохиох
+            </div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 14, lineHeight: 1.5, background: "#f3e5f5", padding: 10, borderRadius: 10 }}>
+              💡 Дүрэм сонговол шинэ үгсээ <b>тэр дүрмээр</b> өгүүлбэрт оруулна. Дүрэм сонгохгүй бол энгийн өгүүлбэр зохионо.
+            </div>
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: t.accent, marginBottom: 8 }}>📖 ДҮРЭМ СОНГОХ (заавал биш)</div>
+            <div style={{ maxHeight: "40vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+              {/* Дүрэмгүй сонголт */}
+              <div onClick={() => setSelectedGrammar(null)} style={{
+                padding: 10, borderRadius: 10, cursor: "pointer",
+                background: !selectedGrammar ? t.soft : "#f8f8f8",
+                border: !selectedGrammar ? `2px solid ${t.accent}` : "2px solid #eee",
+              }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: !selectedGrammar ? t.accent : "#666" }}>
+                  🎲 Дүрэмгүй (энгийн өгүүлбэр)
+                </div>
+              </div>
+              {/* Ангийн grammar-ууд */}
+              {(grammars || []).filter(g => g.word && g.meaning).map((g, i) => {
+                const isSel = selectedGrammar?.word === g.word;
+                return (
+                  <div key={i} onClick={() => setSelectedGrammar(g)} style={{
+                    padding: 10, borderRadius: 10, cursor: "pointer",
+                    background: isSel ? t.soft : "#f8f8f8",
+                    border: isSel ? `2px solid ${t.accent}` : "2px solid #eee",
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: isSel ? t.accent : "#1a1a2e" }}>
+                      📖 {g.word}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{g.meaning}</div>
+                  </div>
+                );
+              })}
+              {(grammars || []).filter(g => g.word && g.meaning).length === 0 && (
+                <div style={{ textAlign: "center", padding: 16, color: "#aaa", fontSize: 12 }}>
+                  Ангид дүрэм байхгүй байна.<br />Энгийн өгүүлбэр зохионо.
+                </div>
+              )}
+            </div>
+
+            <button onClick={() => { setShowGrammarPick(false); startExercise("sentence"); }}
+              style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", background: `linear-gradient(135deg,${t.accent},${t.accent}dd)`, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: `0 4px 0 ${t.border}` }}>
+              ✍️ Эхлэх {selectedGrammar ? `(${selectedGrammar.word} дүрмээр)` : "(энгийн)"}
+            </button>
+          </Overlay>
+        )}
       </div>
     );
   }
@@ -3378,12 +3762,13 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
 // ════════════════════════════════════════════════════════════════════
 
 // ── EditClassModal — Ангийн нэр/цаг/өдөр/өнгө/эхлэсэн огноо засах ──
-function EditClassModal({ cls, onClose, onSaved, onToast }) {
+function EditClassModal({ cls, onClose, onSaved, onToast, teachers = [], isSuperAdmin = false }) {
   const [name, setName] = useState(cls.name || "");
   const [time, setTime] = useState(cls.time || "");
   const [days, setDays] = useState(cls.days || []);
   const [color, setColor] = useState(cls.color || "#7c3aed");
   const [startDate, setStartDate] = useState(cls.start_date || TODAY);
+  const [teacherId, setTeacherId] = useState(cls.teacher_id || "");
   const [saving, setSaving] = useState(false);
 
   const toggleDay = (d) => setDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
@@ -3395,8 +3780,27 @@ function EditClassModal({ cls, onClose, onSaved, onToast }) {
     setSaving(true);
     try {
       const updates = { name: name.trim(), time: time.trim(), days, color, start_date: startDate };
+      if (isSuperAdmin && teacherId && teacherId !== cls.teacher_id) {
+        updates.teacher_id = teacherId;
+        // Багш солихоор бол хуучин болон шинэ багшийн class_ids-ийг шинэчилнэ
+        const oldTeacherId = cls.teacher_id;
+        if (oldTeacherId && oldTeacherId !== teacherId) {
+          const oldTeacher = teachers.find(t => t.id === oldTeacherId);
+          if (oldTeacher) {
+            const newClassIds = (oldTeacher.class_ids || []).filter(id => id !== cls.id);
+            await supaUpdate("teachers", oldTeacherId, { class_ids: newClassIds });
+          }
+        }
+        const newTeacher = teachers.find(t => t.id === teacherId);
+        if (newTeacher) {
+          const newClassIds = [...(newTeacher.class_ids || [])];
+          if (!newClassIds.includes(cls.id)) newClassIds.push(cls.id);
+          await supaUpdate("teachers", teacherId, { class_ids: newClassIds });
+        }
+      }
       await supaUpdate("classes", cls.id, updates);
       onSaved && onSaved(updates);
+      onToast && onToast("✅ Хадгалагдлаа", "success");
       onClose();
     } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
     setSaving(false);
@@ -3424,6 +3828,20 @@ function EditClassModal({ cls, onClose, onSaved, onToast }) {
         <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={INP} />
         <div style={{ fontSize: 10, color: "#888", marginTop: 4 }}>Календарь дээр энэ өдрөөс хичээллэх өдрүүд харагдана</div>
       </div>
+
+      {/* 🔀 Багш солих — зөвхөн сүпэр-админд */}
+      {isSuperAdmin && teachers.length > 0 && (
+        <div style={{ marginBottom: 10, background: "#f3e5f5", borderRadius: 10, padding: 10, border: "1px solid #d4b8ff" }}>
+          <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>👩‍🏫 ХАРИУЦАХ БАГШ</div>
+          <select value={teacherId} onChange={e => setTeacherId(e.target.value)} style={{ ...INP, cursor: "pointer" }}>
+            <option value="">— Багш сонгох —</option>
+            {teachers.map(t => (
+              <option key={t.id} value={t.id}>{t.name} {t.is_super_admin ? "(👑 Сүпэр)" : ""}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 10, color: "#888", marginTop: 4 }}>🔒 Зөвхөн сүпэр-админ багш солих боломжтой</div>
+        </div>
+      )}
 
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 11, color: "#1976d2", fontWeight: 700, marginBottom: 5 }}>📆 ХИЧЭЭЛЛЭХ ӨДРҮҮД</div>
@@ -3543,7 +3961,7 @@ function CopyVocabsModal({ sourceClass, vocabsToCopy, allClasses, onClose, onCop
 
 function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setClasses,
   goBack, attMonth, setAttMonth, teacherId, homeworks, homeworkSubs, exams, examSubs,
-  vocabEntries, refreshAll, onToast, onSelectStudent }) {
+  vocabEntries, refreshAll, onToast, onSelectStudent, teachers = [] }) {
   const [showAddSt, setShowAddSt] = useState(false);
   const [showVocab, setShowVocab] = useState(false);
   const [showBulkAtt, setShowBulkAtt] = useState(false);
@@ -3802,10 +4220,25 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
                       {allSelected ? "✕ Бүгдийг" : "✓ Бүгдийг"}
                     </button>
                     {someSelected && (
-                      <button onClick={() => setShowCopyVocabs(true)} className="k-pop"
-                        style={{ ...btn("#1976d2", "#fff"), padding: "4px 10px", fontSize: 11, boxShadow: "0 2px 0 #0d47a1" }}>
-                        📋 {selectedVocabIds.size} хуулах
-                      </button>
+                      <>
+                        <button onClick={() => setShowCopyVocabs(true)} className="k-pop"
+                          style={{ ...btn("#1976d2", "#fff"), padding: "4px 10px", fontSize: 11, boxShadow: "0 2px 0 #0d47a1" }}>
+                          📋 {selectedVocabIds.size} хуулах
+                        </button>
+                        <button onClick={async () => {
+                          if (!window.confirm(`${selectedVocabIds.size} үгийг устгахдаа итгэлтэй байна уу?\n\nЭнэ үйлдлийг буцаах боломжгүй!`)) return;
+                          try {
+                            const ids = [...selectedVocabIds];
+                            for (const id of ids) await supaDelete("vocab_entries", id);
+                            setSelectedVocabIds(new Set());
+                            onToast && onToast(`✅ ${ids.length} үг устгагдлаа`, "success");
+                            refreshAll && refreshAll();
+                          } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+                        }} className="k-pop"
+                          style={{ ...btn("#e53935", "#fff"), padding: "4px 10px", fontSize: 11, boxShadow: "0 2px 0 #b71c1c" }}>
+                          🗑️ {selectedVocabIds.size} устгах
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -4031,7 +4464,8 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
 
       {/* Edit Class Settings */}
       {showEditCls && (
-        <EditClassModal cls={cls} onClose={() => setShowEditCls(false)} onSaved={(updated) => {
+        <EditClassModal cls={cls} teachers={teachers} isSuperAdmin={isSuperAdmin}
+          onClose={() => setShowEditCls(false)} onSaved={(updated) => {
           setClasses && setClasses(prev => prev.map(c => c.id === cls.id ? { ...c, ...updated } : c));
           refreshAll && refreshAll();
           onToast && onToast("✅ Анги шинэчлэгдлээ", "success");
@@ -4158,6 +4592,9 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
   const [activeExam, setActiveExam] = useState(null);
   const [showChangePw, setShowChangePw] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState(s.photo_url || "");
+  const [photoSaving, setPhotoSaving] = useState(false);
   const [editNotes, setEditNotes] = useState(false);
   const [notes, setNotes] = useState(s.teacher_notes || "");
   const [hwTab, setHwTab] = useState("pending"); // pending | done | overdue
@@ -4188,6 +4625,9 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
   const completedHws = myHws.filter(h => subMap[h.id]);
   const overdueHws = myHws.filter(h => !subMap[h.id] && new Date(h.due_date) <= new Date());
 
+  // Exam history
+  const myExamSubs = (examSubs || []).filter(es => es.student_id === s.id).sort((a, b) => (b.submitted_at || "").localeCompare(a.submitted_at || ""));
+
   // Active exam check
   const myActiveExam = (exams || []).find(e => e.class_id === s.class_id && e.status === "active"
     && !(examSubs || []).find(es => es.exam_id === e.id && es.student_id === s.id));
@@ -4198,6 +4638,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
       <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: t.bg, overflowY: "auto" }}>
         <style>{ANIMATIONS}</style>
         <StudentExamScreen exam={activeExam} vocabEntries={vocabEntries} student={s} t={t}
+          previousSubmissions={examSubmissions || []}
           onComplete={({ score, xpEarned }) => {
             setStudents(prev => prev.map(x => x.id === s.id ? { ...x, xp: (x.xp || 0) + xpEarned } : x));
             refreshAll && refreshAll();
@@ -4292,6 +4733,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
         }} style={btn("#fff", t.text, t.border)}>← Гарах</button>
         <div style={{ fontWeight: 800, fontSize: 14, color: t.accent }}>🌸 Кандун</div>
         <div style={{ display: "flex", gap: 5 }}>
+          <button onClick={() => { setPhotoUrl(s.photo_url || ""); setShowPhotoUpload(true); }} style={btn(t.soft, t.accent)} title="Профайл зураг">📷</button>
           <button onClick={() => setShowThemePicker(true)} style={btn(t.soft, t.accent)} title="Theme солих">🎨</button>
           <button onClick={() => setShowChangePw(true)} style={btn(t.soft, t.accent)} title="Нууц үг солих">🔑</button>
         </div>
@@ -4403,6 +4845,11 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
                 action: () => setView("vocablist"),
               },
               {
+                id: "examhistory", emoji: "📊", title: "Шалгалтын түүх",
+                sub: `${myExamSubs.length} удаа өгсөн`, bg: "#f3e5f5", color: "#7c3aed",
+                action: () => setView("examhistory"),
+              },
+              {
                 id: "leaderboard", emoji: "🏆", title: "Жагсаалт",
                 sub: `Ангийн ${classmates.length} сурагч`, bg: "#fff8e1", color: "#ffca28",
                 action: () => setView("leaderboard"),
@@ -4467,6 +4914,115 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
         </div>
       )}
 
+      {/* 📊 ШАЛГАЛТЫН ТҮҮХ + КАЛЕНДАРЬ */}
+      {view === "examhistory" && (() => {
+        const avgScore = myExamSubs.length > 0 ? Math.round(myExamSubs.reduce((a, b) => a + (b.score || 0), 0) / myExamSubs.length) : 0;
+        const bestScore = myExamSubs.length > 0 ? Math.max(...myExamSubs.map(es => es.score || 0)) : 0;
+        const totalXp = myExamSubs.reduce((a, b) => a + (b.xp_earned || 0), 0);
+
+        // Календарь — сүүлийн 30 өдөр
+        const today = new Date();
+        const days = [];
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const dateStr = d.toISOString().slice(0, 10);
+          const subsThisDay = myExamSubs.filter(es => (es.submitted_at || "").slice(0, 10) === dateStr);
+          days.push({ date: dateStr, day: d.getDate(), subs: subsThisDay });
+        }
+
+        return (
+          <div className="k-fade">
+            {/* Статистик */}
+            <div style={{ background: t.card, borderRadius: 18, padding: 16, border: `2px solid ${t.border}`, marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, color: t.text, marginBottom: 12, textAlign: "center" }}>📊 Шалгалтын статистик</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
+                <div style={{ background: t.soft, borderRadius: 10, padding: 8, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: t.text, opacity: .7, fontWeight: 700 }}>НИЙТ</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: t.accent }}>{myExamSubs.length}</div>
+                </div>
+                <div style={{ background: t.soft, borderRadius: 10, padding: 8, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: t.text, opacity: .7, fontWeight: 700 }}>ДУНДАЖ</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: avgScore >= 70 ? "#43a047" : "#f57c00" }}>{avgScore}</div>
+                </div>
+                <div style={{ background: t.soft, borderRadius: 10, padding: 8, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: t.text, opacity: .7, fontWeight: 700 }}>МАХ</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#43a047" }}>{bestScore}</div>
+                </div>
+                <div style={{ background: t.soft, borderRadius: 10, padding: 8, textAlign: "center" }}>
+                  <div style={{ fontSize: 9, color: t.text, opacity: .7, fontWeight: 700 }}>XP</div>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#7c3aed" }}>+{totalXp}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Календарь - 30 өдөр */}
+            <div style={{ background: t.card, borderRadius: 18, padding: 16, border: `2px solid ${t.border}`, marginBottom: 12 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 10 }}>📅 Сүүлийн 30 өдөр</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3 }}>
+                {days.map(d => {
+                  const has = d.subs.length > 0;
+                  const bestOfDay = has ? Math.max(...d.subs.map(s => s.score || 0)) : 0;
+                  return (
+                    <div key={d.date} title={`${d.date}: ${has ? `${d.subs.length} шалгалт, ${bestOfDay}%` : "Шалгалт өгөөгүй"}`}
+                      style={{
+                        aspectRatio: 1, borderRadius: 6, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center",
+                        background: has ? (bestOfDay >= 80 ? "#43a047" : bestOfDay >= 60 ? "#ffa726" : "#ef5350") : t.soft,
+                        color: has ? "#fff" : t.text + "55",
+                      }}>{d.day}</div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, fontSize: 9, color: t.text, opacity: .6, justifyContent: "center" }}>
+                <span>🟢 80+</span> <span>🟠 60-79</span> <span>🔴 0-59</span>
+              </div>
+            </div>
+
+            {/* Бүх шалгалтын жагсаалт */}
+            <div style={{ background: t.card, borderRadius: 18, padding: 16, border: `2px solid ${t.border}` }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 10 }}>📝 Бүх шалгалт ({myExamSubs.length})</div>
+              {myExamSubs.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 20, color: t.text, opacity: .5 }}>
+                  <div style={{ fontSize: 40, marginBottom: 6 }}>📭</div>
+                  <div style={{ fontSize: 12 }}>Одоохондоо шалгалт өгөөгүй</div>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {myExamSubs.map((es, i) => {
+                    const exam = (exams || []).find(e => e.id === es.exam_id);
+                    const prev = myExamSubs[i + 1]; // Дараагийн (= өмнөх удаа)
+                    const change = prev ? (es.score || 0) - (prev.score || 0) : null;
+                    return (
+                      <div key={es.id} style={{ background: t.soft, borderRadius: 10, padding: 10, fontSize: 12 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, color: t.text, marginBottom: 2 }}>
+                              {exam?.title || "(устгагдсан)"}
+                            </div>
+                            <div style={{ fontSize: 10, color: t.text, opacity: .6 }}>
+                              📅 {(es.submitted_at || "").slice(0, 10) || "—"}
+                              {change !== null && change !== 0 && (
+                                <span style={{ marginLeft: 6, color: change > 0 ? "#43a047" : "#e53935", fontWeight: 700 }}>
+                                  {change > 0 ? `▲ +${change}` : `▼ ${change}`}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{
+                            background: (es.score || 0) >= 80 ? "#43a047" : (es.score || 0) >= 60 ? "#ffa726" : "#ef5350",
+                            color: "#fff", padding: "6px 12px", borderRadius: 10, fontWeight: 900, fontSize: 14,
+                          }}>{es.score}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* HOMEWORK VIEW */}
       {view === "homework" && (
         <div className="k-fade" style={{ background: t.card, borderRadius: 18, padding: 14, border: `2px solid ${t.border}` }}>
@@ -4517,6 +5073,102 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
 
       {showChangePw && (
         <ChangePasswordModal studentId={s.id} onClose={() => setShowChangePw(false)} onToast={onToast} />
+      )}
+
+      {/* Профайл зураг солих */}
+      {showPhotoUpload && (
+        <Overlay onClose={() => setShowPhotoUpload(false)} maxW={400}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 24 }}>📷</span>
+            Профайл зураг
+          </div>
+
+          {/* Одоогийн зураг preview */}
+          <div style={{ textAlign: "center", marginBottom: 14 }}>
+            <div style={{
+              width: 100, height: 100, borderRadius: "50%", margin: "0 auto",
+              overflow: "hidden", border: `4px solid ${t.accent}`, background: t.soft,
+              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44,
+            }}>
+              {photoUrl ? <img src={photoUrl} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" onError={e => e.target.style.display = "none"} /> : t.emoji}
+            </div>
+          </div>
+
+          {/* Файл сонгох */}
+          <div style={{ marginBottom: 10 }}>
+            <label style={{
+              display: "block", padding: 12, borderRadius: 12, border: `2px dashed ${t.border}`,
+              textAlign: "center", cursor: "pointer", background: t.soft, color: t.accent, fontWeight: 700, fontSize: 13,
+            }}>
+              📁 Зураг сонгох (Гар утаснаас)
+              <input type="file" accept="image/*" style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  // Хэмжээ шалгах — 1MB-аас бага байх
+                  if (file.size > 2 * 1024 * 1024) {
+                    onToast && onToast("❌ Зураг 2MB-аас бага байх ёстой", "error");
+                    return;
+                  }
+                  const reader = new FileReader();
+                  reader.onload = (ev) => {
+                    // Зургийг багасгаж base64 болгох
+                    const img = new Image();
+                    img.onload = () => {
+                      const canvas = document.createElement("canvas");
+                      const maxSize = 300;
+                      let { width, height } = img;
+                      if (width > height) {
+                        if (width > maxSize) { height = height * maxSize / width; width = maxSize; }
+                      } else {
+                        if (height > maxSize) { width = width * maxSize / height; height = maxSize; }
+                      }
+                      canvas.width = width; canvas.height = height;
+                      const ctx = canvas.getContext("2d");
+                      ctx.drawImage(img, 0, 0, width, height);
+                      const compressed = canvas.toDataURL("image/jpeg", 0.7);
+                      setPhotoUrl(compressed);
+                    };
+                    img.src = ev.target.result;
+                  };
+                  reader.readAsDataURL(file);
+                }} />
+            </label>
+          </div>
+
+          <div style={{ fontSize: 10, color: "#888", marginBottom: 14, textAlign: "center" }}>
+            💡 Зураг автоматаар багасгагдана (300px)
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowPhotoUpload(false)} style={{ ...btn("#fff", "#333", "#e0e0e0"), flex: 1, justifyContent: "center" }}>Болих</button>
+            {photoUrl && (
+              <button onClick={async () => {
+                setPhotoSaving(true);
+                try {
+                  await upd({ photo_url: photoUrl });
+                  onToast && onToast("✅ Зураг хадгалагдлаа", "success");
+                  setShowPhotoUpload(false);
+                } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+                setPhotoSaving(false);
+              }} disabled={photoSaving}
+                style={{ ...btn(t.accent, "#fff"), flex: 2, justifyContent: "center", boxShadow: `0 3px 0 ${t.border}`, opacity: photoSaving ? .5 : 1 }}>
+                {photoSaving ? "⏳..." : "💾 Хадгалах"}
+              </button>
+            )}
+          </div>
+          {s.photo_url && (
+            <button onClick={async () => {
+              if (!window.confirm("Зургийг устгах уу?")) return;
+              await upd({ photo_url: null });
+              setPhotoUrl("");
+              onToast && onToast("✅ Зураг устгагдлаа", "success");
+              setShowPhotoUpload(false);
+            }} style={{ width: "100%", marginTop: 8, padding: 8, borderRadius: 10, border: "none", background: "transparent", color: "#c62828", fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>
+              🗑️ Одоогийн зургийг устгах
+            </button>
+          )}
+        </Overlay>
       )}
 
       {/* Theme picker */}
@@ -4676,10 +5328,25 @@ td.type { width: 60px; text-align: center; font-size: 11px }
             {selectedIds.size} / {filtered.length} сонгогдсон
           </div>
           {selectedIds.size > 0 && (
-            <button onClick={() => setShowCopyTo(true)} className="k-pop"
-              style={{ ...btn("#1976d2", "#fff"), boxShadow: "0 3px 0 #0d47a1" }}>
-              📋 Хуулах
-            </button>
+            <div style={{ display: "flex", gap: 5 }}>
+              <button onClick={() => setShowCopyTo(true)} className="k-pop"
+                style={{ ...btn("#1976d2", "#fff"), boxShadow: "0 3px 0 #0d47a1" }}>
+                📋 Хуулах
+              </button>
+              <button onClick={async () => {
+                if (!window.confirm(`${selectedIds.size} үгийг устгахдаа итгэлтэй байна уу?\n\nЭнэ үйлдлийг буцаах боломжгүй!`)) return;
+                try {
+                  const ids = [...selectedIds];
+                  for (const id of ids) await supaDelete("vocab_entries", id);
+                  setSelectedIds(new Set());
+                  onToast && onToast(`✅ ${ids.length} үг устгагдлаа`, "success");
+                  onChanged && onChanged();
+                } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+              }} className="k-pop"
+                style={{ ...btn("#e53935", "#fff"), boxShadow: "0 3px 0 #b71c1c" }}>
+                🗑️ Устгах
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -4953,6 +5620,7 @@ export default function App() {
   // ── State ───
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [vocabEntries, setVocabEntries] = useState([]);
   const [homeworks, setHomeworks] = useState([]);
   const [homeworkSubs, setHomeworkSubs] = useState([]);
@@ -5009,18 +5677,20 @@ export default function App() {
 
       // Хоёрдогч мэдээлэл — арын background-д үргэлжлүүлж ачаална
       try {
-        const [hws, hsubs, exs, esubs, pends] = await Promise.all([
+        const [hws, hsubs, exs, esubs, pends, ts] = await Promise.all([
           supaSelect("homeworks").catch(() => []),
           supaSelect("homework_submissions").catch(() => []),
           supaSelect("exams").catch(() => []),
           supaSelect("exam_submissions").catch(() => []),
           supaSelect("pending_students").catch(() => []),
+          supaSelect("teachers").catch(() => []),
         ]);
         setHomeworks(hws || []);
         setHomeworkSubs(hsubs || []);
         setExams(exs || []);
         setExamSubs(esubs || []);
         setPending(pends || []);
+        setTeachers(ts || []);
       } catch (e) {
         console.warn("Secondary load error:", e.message);
       }
@@ -5072,6 +5742,7 @@ export default function App() {
     subscribe("exams", setExams);
     subscribe("exam_submissions", setExamSubs);
     subscribe("pending_students", setPending);
+    subscribe("teachers", setTeachers);
 
     // Cleanup — компонент unmount хийгдэхэд listeners-ийг хаах
     return () => unsubscribers.forEach(unsub => {
@@ -5147,7 +5818,24 @@ export default function App() {
   // ── Teacher view ──
   const isTeacher = user.role === "teacher";
   const isSuperAdmin = user.isSuperAdmin;
-  const visibleClasses = isSuperAdmin ? classes : classes.filter(c => user.class_ids?.includes(c.id));
+  // Сүпэр-админ багш сонгож тэр багшийн ангийг тусад нь харах
+  const [viewingTeacherId, setViewingTeacherId] = useState(null);
+  // Багш ангитай эсэхийг шалгах функц
+  // 1) teacher_id заасан байна → яг тэрэнтэй таарах
+  // 2) teacher_id заагаагүй (хуучин анги) → class_ids дотор байгаа эсэх
+  const classBelongsToTeacher = (c, teacherId) => {
+    if (c.teacher_id) return c.teacher_id === teacherId;
+    // Fallback — багшийн class_ids дотор байгаа эсэх
+    const t = teachers.find(x => x.id === teacherId);
+    return t?.class_ids?.includes(c.id) || false;
+  };
+  // viewingTeacherId set хийгдсэн бол → ТЭР багшийн ангиудыг харна
+  // null бол → өөрийн ангиудыг харна
+  const visibleClasses = isSuperAdmin
+    ? (viewingTeacherId
+        ? classes.filter(c => classBelongsToTeacher(c, viewingTeacherId))
+        : classes.filter(c => classBelongsToTeacher(c, user.id)))
+    : classes.filter(c => user.class_ids?.includes(c.id));
 
   // Selected class detail
   if (selCls) {
@@ -5182,7 +5870,7 @@ export default function App() {
         <ClassDetail cls={cls} isAdmin={isTeacher} isSuperAdmin={isSuperAdmin}
           students={clsSts} setStudents={setStudents} setClasses={setClasses}
           goBack={() => setSelCls(null)} attMonth={attMonth} setAttMonth={setAttMonth}
-          teacherId={user.id}
+          teacherId={user.id} teachers={teachers}
           homeworks={homeworks} homeworkSubs={homeworkSubs}
           exams={exams} examSubs={examSubs}
           vocabEntries={vocabEntries} refreshAll={() => loadAll(true)}
@@ -5247,6 +5935,46 @@ export default function App() {
             }} style={btn("#fff", "#e53935", "#ffcdd2")}>Гарах</button>
           </div>
         </div>
+
+        {/* 👑 Сүпэр-Админ — Багш сонгож тэр багшийн ангиудыг харах */}
+        {isSuperAdmin && teachers.length > 1 && (
+          <div className="k-fade" style={{ background: "#fff", borderRadius: 14, padding: 10, marginBottom: 12, border: "2px solid #d4b8ff", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", display: "flex", alignItems: "center", gap: 4 }}>
+              👑 ХЭНИЙ АНГИУД?
+            </div>
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", flex: 1 }}>
+              <button onClick={() => setViewingTeacherId(null)}
+                style={{
+                  padding: "4px 10px", borderRadius: 8, border: "none",
+                  background: !viewingTeacherId ? "#7c3aed" : "#f3e5f5",
+                  color: !viewingTeacherId ? "#fff" : "#7c3aed",
+                  fontWeight: 700, fontSize: 11, cursor: "pointer",
+                }}>
+                🌸 Миний ({classes.filter(c => classBelongsToTeacher(c, user.id)).length})
+              </button>
+              {teachers.filter(t => t.id !== user.id).map(t => {
+                const cnt = classes.filter(c => classBelongsToTeacher(c, t.id)).length;
+                const isSel = viewingTeacherId === t.id;
+                return (
+                  <button key={t.id} onClick={() => setViewingTeacherId(t.id)}
+                    style={{
+                      padding: "4px 10px", borderRadius: 8, border: "none",
+                      background: isSel ? "#7c3aed" : "#f3e5f5",
+                      color: isSel ? "#fff" : "#7c3aed",
+                      fontWeight: 700, fontSize: 11, cursor: "pointer",
+                    }}>
+                    👩‍🏫 {t.name} ({cnt})
+                  </button>
+                );
+              })}
+            </div>
+            {viewingTeacherId && (
+              <div style={{ width: "100%", fontSize: 10, color: "#888", textAlign: "center", marginTop: 4, fontStyle: "italic" }}>
+                👁️ Та одоо <b>{teachers.find(t => t.id === viewingTeacherId)?.name}</b>-ийн ангиудыг харж байна
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Өнөөдрийн тойм */}
         <div className="k-fade" style={{ background: "#fff", borderRadius: 18, padding: 16, marginBottom: 16, border: "1px solid #f0f0f0", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
@@ -5426,7 +6154,14 @@ export default function App() {
                   showToast("❌ Бүгдийг бөглөнө үү", "error"); return;
                 }
                 try {
-                  await supaInsert("classes", { id: `c${Date.now()}`, ...nc, name: nc.name.trim(), time: nc.time.trim() });
+                  const newClsId = `c${Date.now()}`;
+                  await supaInsert("classes", { id: newClsId, ...nc, name: nc.name.trim(), time: nc.time.trim(), teacher_id: user.id, start_date: TODAY });
+                  // Багшийн class_ids-руу нэмэх
+                  const currentTeacher = teachers.find(t => t.id === user.id);
+                  if (currentTeacher) {
+                    const newClassIds = [...(currentTeacher.class_ids || []), newClsId];
+                    await supaUpdate("teachers", user.id, { class_ids: newClassIds });
+                  }
                   setNc({ name: "", time: "", days: [], color: "#e91e8c" });
                   setShowAddCls(false);
                   showToast("✅ Анги нэмэгдлээ", "success");
