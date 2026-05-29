@@ -744,27 +744,49 @@ function AuthScreen({ onAuth }) {
   const doLoginTeacher = async () => {
     setBusy(true); setErr("");
     try {
-      const ts = await supaSelect("teachers", `select=*&email=eq.${encodeURIComponent(email.trim())}&password=eq.${encodeURIComponent(pass)}`);
-      if (ts && ts.length) {
-        const t = ts[0];
+      // Зөвхөн email-ээр хайж, password-ийг JS дотор шалгана (найдвартай)
+      const emailLower = email.trim().toLowerCase();
+      const allTeachers = await fbSelect("teachers");
+      const t = allTeachers.find(x =>
+        (x.email || "").toLowerCase().trim() === emailLower &&
+        String(x.password || "") === String(pass)
+      );
+      if (t) {
         onAuth({
-          id: t.id, role: "teacher", isSuperAdmin: t.role === "superadmin",
+          id: t.id, role: "teacher", isSuperAdmin: t.role === "superadmin" || t.is_super_admin === true,
           displayName: t.name, class_ids: t.class_ids || null,
         });
-      } else setErr("И-мэйл эсвэл нууц үг буруу");
-    } catch (e) { setErr("Сервертэй холбогдож чадахгүй байна"); }
+      } else {
+        // Email олдсон ч password буруу эсэхийг ялгаж мэдэгдэх
+        const emailExists = allTeachers.some(x => (x.email || "").toLowerCase().trim() === emailLower);
+        setErr(emailExists ? "Нууц үг буруу байна" : "И-мэйл олдсонгүй");
+      }
+    } catch (e) {
+      console.error("Login error:", e);
+      setErr("Сервертэй холбогдож чадахгүй байна: " + e.message);
+    }
     setBusy(false);
   };
 
   const doLoginStudent = async () => {
     setBusy(true); setErr("");
     try {
-      const sts = await supaSelect("students", `select=*&email=eq.${encodeURIComponent(email.trim())}&password=eq.${encodeURIComponent(pass)}`);
-      if (sts && sts.length) {
-        const st = sts[0];
+      const emailLower = email.trim().toLowerCase();
+      const allStudents = await fbSelect("students");
+      const st = allStudents.find(x =>
+        (x.email || "").toLowerCase().trim() === emailLower &&
+        String(x.password || "") === String(pass)
+      );
+      if (st) {
         onAuth({ id: st.id, role: "student", displayName: st.name });
-      } else setErr("И-мэйл эсвэл нууц үг буруу");
-    } catch (e) { setErr("Сервертэй холбогдож чадахгүй байна"); }
+      } else {
+        const emailExists = allStudents.some(x => (x.email || "").toLowerCase().trim() === emailLower);
+        setErr(emailExists ? "Нууц үг буруу байна" : "И-мэйл олдсонгүй");
+      }
+    } catch (e) {
+      console.error("Login error:", e);
+      setErr("Сервертэй холбогдож чадахгүй байна: " + e.message);
+    }
     setBusy(false);
   };
 
