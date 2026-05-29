@@ -5661,6 +5661,8 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   // New class form
   const [nc, setNc] = useState({ name: "", time: "", days: [], color: "#e91e8c" });
+  // Сүпэр-админ багш сонгож тэр багшийн ангийг тусад нь харах
+  const [viewingTeacherId, setViewingTeacherId] = useState(null);
 
   const showToast = (msg, type) => setToast({ msg, type: type || "success" });
 
@@ -5840,8 +5842,6 @@ export default function App() {
   // ── Teacher view ──
   const isTeacher = user.role === "teacher";
   const isSuperAdmin = user.isSuperAdmin;
-  // Сүпэр-админ багш сонгож тэр багшийн ангийг тусад нь харах
-  const [viewingTeacherId, setViewingTeacherId] = useState(null);
   // Багш ангитай эсэхийг шалгах функц
   // 1) teacher_id заасан байна → яг тэрэнтэй таарах
   // 2) teacher_id заагаагүй (хуучин анги) → class_ids дотор байгаа эсэх
