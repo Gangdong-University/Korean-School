@@ -2694,7 +2694,21 @@ function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onClose
   }
 
   // ─── EXAM ───
-  if (questions.length === 0) return null;
+  if (questions.length === 0) {
+    return (
+      <div style={{ minHeight: "100vh", background: t.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "system-ui", maxWidth: 480, margin: "0 auto" }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>📭</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: t.text, marginBottom: 8, textAlign: "center" }}>Асуулт үүсгэх боломжгүй</div>
+        <div style={{ fontSize: 13, color: t.text, opacity: .7, textAlign: "center", marginBottom: 20, lineHeight: 1.5 }}>
+          Энэ шалгалтын сонгосон өдрүүдэд хангалттай үг алга байна.<br />
+          (Хамгийн багадаа 2 үг хэрэгтэй)
+        </div>
+        <button onClick={onClose} style={{ ...btn(t.accent, "#fff"), padding: "12px 24px", fontSize: 14 }}>
+          ← Буцах
+        </button>
+      </div>
+    );
+  }
   const q = questions[currentIdx];
   const userAns = answers[currentIdx] || "";
   const mins = Math.floor(remainingSec / 60);
@@ -4660,7 +4674,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
       <div style={{ position: "fixed", inset: 0, zIndex: 5000, background: t.bg, overflowY: "auto" }}>
         <style>{ANIMATIONS}</style>
         <StudentExamScreen exam={activeExam} vocabEntries={vocabEntries} student={s} t={t}
-          previousSubmissions={examSubmissions || []}
+          previousSubmissions={examSubs || []}
           onComplete={({ score, xpEarned }) => {
             setStudents(prev => prev.map(x => x.id === s.id ? { ...x, xp: (x.xp || 0) + xpEarned } : x));
             refreshAll && refreshAll();
