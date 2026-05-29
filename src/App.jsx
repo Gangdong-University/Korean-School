@@ -5844,20 +5844,26 @@ export default function App() {
   const isSuperAdmin = user.isSuperAdmin;
   // Багш ангитай эсэхийг шалгах функц
   // 1) teacher_id заасан байна → яг тэрэнтэй таарах
-  // 2) teacher_id заагаагүй (хуучин анги) → class_ids дотор байгаа эсэх
+  // 2) teacher_id заагаагүй (хуучин анги) → эзэнгүй гэж үзнэ
   const classBelongsToTeacher = (c, teacherId) => {
     if (c.teacher_id) return c.teacher_id === teacherId;
     // Fallback — багшийн class_ids дотор байгаа эсэх
     const t = teachers.find(x => x.id === teacherId);
-    return t?.class_ids?.includes(c.id) || false;
+    if (t?.class_ids?.includes(c.id)) return true;
+    return false;
+  };
+  // Эзэнгүй анги = teacher_id ч байхгүй, ямар ч багшийн class_ids-д ч байхгүй
+  const isOrphanClass = (c) => {
+    if (c.teacher_id) return false;
+    return !teachers.some(t => t.class_ids?.includes(c.id));
   };
   // viewingTeacherId set хийгдсэн бол → ТЭР багшийн ангиудыг харна
-  // null бол → өөрийн ангиудыг харна
+  // null бол → өөрийн ангиуд + эзэнгүй ангиуд (хуучин ангиуд алга болохгүй)
   const visibleClasses = isSuperAdmin
     ? (viewingTeacherId
         ? classes.filter(c => classBelongsToTeacher(c, viewingTeacherId))
-        : classes.filter(c => classBelongsToTeacher(c, user.id)))
-    : classes.filter(c => user.class_ids?.includes(c.id));
+        : classes.filter(c => classBelongsToTeacher(c, user.id) || isOrphanClass(c)))
+    : classes.filter(c => user.class_ids?.includes(c.id) || classBelongsToTeacher(c, user.id));
 
   // Selected class detail
   if (selCls) {
@@ -5972,7 +5978,7 @@ export default function App() {
                   color: !viewingTeacherId ? "#fff" : "#7c3aed",
                   fontWeight: 700, fontSize: 11, cursor: "pointer",
                 }}>
-                🌸 Миний ({classes.filter(c => classBelongsToTeacher(c, user.id)).length})
+                🌸 Миний ({classes.filter(c => classBelongsToTeacher(c, user.id) || isOrphanClass(c)).length})
               </button>
               {teachers.filter(t => t.id !== user.id).map(t => {
                 const cnt = classes.filter(c => classBelongsToTeacher(c, t.id)).length;
