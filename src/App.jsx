@@ -5843,26 +5843,18 @@ export default function App() {
   const isTeacher = user.role === "teacher";
   const isSuperAdmin = user.isSuperAdmin;
   // Багш ангитай эсэхийг шалгах функц
-  // 1) teacher_id заасан байна → яг тэрэнтэй таарах
-  // 2) teacher_id заагаагүй (хуучин анги) → эзэнгүй гэж үзнэ
   const classBelongsToTeacher = (c, teacherId) => {
     if (c.teacher_id) return c.teacher_id === teacherId;
-    // Fallback — багшийн class_ids дотор байгаа эсэх
     const t = teachers.find(x => x.id === teacherId);
     if (t?.class_ids?.includes(c.id)) return true;
     return false;
   };
-  // Эзэнгүй анги = teacher_id ч байхгүй, ямар ч багшийн class_ids-д ч байхгүй
-  const isOrphanClass = (c) => {
-    if (c.teacher_id) return false;
-    return !teachers.some(t => t.class_ids?.includes(c.id));
-  };
   // viewingTeacherId set хийгдсэн бол → ТЭР багшийн ангиудыг харна
-  // null бол → өөрийн ангиуд + эзэнгүй ангиуд (хуучин ангиуд алга болохгүй)
+  // null бол → СҮПЭР-АДМИН БҮХ АНГИЙГ ХАРНА (хуучин ангиуд алга болохгүй)
   const visibleClasses = isSuperAdmin
     ? (viewingTeacherId
         ? classes.filter(c => classBelongsToTeacher(c, viewingTeacherId))
-        : classes.filter(c => classBelongsToTeacher(c, user.id) || isOrphanClass(c)))
+        : classes)  // ← Сүпэр-админ БҮХ ангиа харна
     : classes.filter(c => user.class_ids?.includes(c.id) || classBelongsToTeacher(c, user.id));
 
   // Selected class detail
@@ -5978,7 +5970,7 @@ export default function App() {
                   color: !viewingTeacherId ? "#fff" : "#7c3aed",
                   fontWeight: 700, fontSize: 11, cursor: "pointer",
                 }}>
-                🌸 Миний ({classes.filter(c => classBelongsToTeacher(c, user.id) || isOrphanClass(c)).length})
+                🌸 Бүгд ({classes.length})
               </button>
               {teachers.filter(t => t.id !== user.id).map(t => {
                 const cnt = classes.filter(c => classBelongsToTeacher(c, t.id)).length;
