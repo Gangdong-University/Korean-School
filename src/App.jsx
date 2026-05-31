@@ -301,10 +301,31 @@ async function geminiCall(prompt, opts = {}) {
     },
   };
   if (opts.system) body.systemInstruction = { parts: [{ text: opts.system }] };
-  const r = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error("AI алдаа: " + r.status);
+  // 429 (rate limit) үед автомат дахин оролдоно (2 удаа)
+  let r, lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    r = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (r.ok) break;
+    // Алдааны дэлгэрэнгүйг уншина
+    let errDetail = "";
+    try {
+      const errData = await r.json();
+      errDetail = errData?.error?.message || "";
+    } catch (e) {}
+    lastErr = errDetail;
+    if (r.status === 429) {
+      // Rate limit — түр хүлээгээд дахин оролдоно
+      if (attempt < 2) {
+        await new Promise(res => setTimeout(res, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw new Error("Хэт олон хүсэлт (429). Түр хүлээгээд дахин оролдоно уу. " + (errDetail ? "[" + errDetail.slice(0, 120) + "]" : ""));
+    }
+    // Бусад алдаа
+    throw new Error(`AI алдаа ${r.status}: ${errDetail.slice(0, 150) || "тодорхойгүй"}`);
+  }
   const data = await r.json();
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
@@ -445,6 +466,54 @@ async function getEmojiByAI(word, meaning) {
     _emojiCache[key] = emoji;
     return emoji;
   } catch (e) { return "📝"; }
+}
+
+// ── UNSPLASH ЗУРАГ ХАЙХ ──────────────────────────────────────────────
+// ⚠️ ЧУХАЛ: Энэ апп бол СОЛОНГОС-МОНГОЛ. Англи үг хаана ч ХАРАГДАХГҮЙ.
+// Зөвхөн дотоод ажиллагаанд (зургийн санд хайхад) англи түлхүүр хэрэгтэй,
+// учир нь Unsplash (зургийн сан) зөвхөн англиар хайдаг.
+// Сурагч зөвхөн: солонгос үг + монгол утга + зураг л харна.
+// 🔒 Unsplash Access Key-г .env-ээс уншина (VITE_UNSPLASH_KEY)
+// 90 сурагч ашиглах учир: зургийг НЭГ удаа хайж Firebase-д хадгална.
+// Дараа нь бүх сурагч хадгалсан URL-ийг л ашиглана (зардал/хурд хэмнэнэ).
+const UNSPLASH_KEY =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_UNSPLASH_KEY) || "";
+
+// Монгол утгыг англи болгож → Unsplash-аас зураг хайна
+const _imageCache = {};
+async function fetchWordImage(word, meaning) {
+  if (!UNSPLASH_KEY) return null;
+  const cacheKey = `${word}|${meaning}`;
+  if (_imageCache[cacheKey] !== undefined) return _imageCache[cacheKey];
+  try {
+    // 1) Хамгийн зөв англи үг гаргах (Gemini, хямд)
+    //    Солонгос үг + монгол утга ХОЁУЛАНГ өгнө → Gemini хамгийн зөв англи үгийг сонгоно
+    //    (солонгос үг = жинхэнэ үг, монгол утга = баталгаа)
+    let searchTerm = "";
+    if (GEMINI_API_KEY) {
+      try {
+        const en = await geminiCall(
+          `Солонгос үг "${word}" (монголоор "${meaning}") — энэ зүйлийг Unsplash-аас зураг хайхад тохирох ЗӨВХӨН нэг энгийн англи нэр үгээр буцаа. Жишээ: "사과"/"алим"→"apple", "학교"/"сургууль"→"school". Зөвхөн нэг англи үг буцаа, тайлбар бичихгүй.`,
+          { system: "Та зөвхөн нэг энгийн англи нэр үг буцаана. Өөр юу ч бичихгүй." }
+        );
+        searchTerm = (en || "").trim().toLowerCase().replace(/[^a-z\s]/g, "").split("\n")[0].trim().slice(0, 30);
+      } catch (e) {}
+    }
+    if (!searchTerm) searchTerm = meaning; // fallback — Gemini ажиллахгүй бол монгол утга
+    // 2) Unsplash-аас хайх
+    const r = await fetch(
+      `https://api.unsplash.com/search/photos?query=${encodeURIComponent(searchTerm)}&per_page=1&orientation=squarish`,
+      { headers: { Authorization: `Client-ID ${UNSPLASH_KEY}` } }
+    );
+    if (!r.ok) { _imageCache[cacheKey] = null; return null; }
+    const data = await r.json();
+    const url = data?.results?.[0]?.urls?.small || null;
+    _imageCache[cacheKey] = url;
+    return url;
+  } catch (e) {
+    _imageCache[cacheKey] = null;
+    return null;
+  }
 }
 
 // AI-аар өгүүлбэр үүсгэх (cache)
@@ -1440,8 +1509,12 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
                         width: 44, height: 44, borderRadius: "50%",
                         background: isGr ? "#ede0ff" : "#fff3d0",
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 24, marginBottom: 6,
-                      }}>{isGr ? "📖" : emoji}</div>
+                        fontSize: 24, marginBottom: 6, overflow: "hidden",
+                      }}>
+                        {!isGr && v.image_url
+                          ? <img src={v.image_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                          : (isGr ? "📖" : emoji)}
+                      </div>
                       <div style={{ fontWeight: 900, fontSize: 16, color: isGr ? "#7c3aed" : "#b8860b", marginBottom: 2 }}>{v.word}</div>
                       <div style={{ fontSize: 11, color: "#666", lineHeight: 1.3 }}>{v.meaning}</div>
                     </div>
@@ -1468,8 +1541,10 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
               <div style={{ background: `linear-gradient(160deg, ${isGr ? "#9c6bff" : t.accent}, ${isGr ? "#7c3aed" : t.accent}cc)`, padding: "32px 24px", textAlign: "center", position: "relative" }}>
                 <button onClick={() => setCardWord(null)}
                   style={{ position: "absolute", top: 14, right: 14, background: "rgba(255,255,255,0.3)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", fontSize: 16, color: "#fff", fontWeight: 700 }}>✕</button>
-                <div style={{ width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, margin: "0 auto 14px" }}>
-                  {isGr ? "📖" : emoji}
+                <div style={{ width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, margin: "0 auto 14px", overflow: "hidden" }}>
+                  {!isGr && cardWord.image_url
+                    ? <img src={cardWord.image_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                    : (isGr ? "📖" : emoji)}
                 </div>
                 <div style={{ fontSize: 38, fontWeight: 900, color: "#fff", marginBottom: 4 }}>{cardWord.word}</div>
                 <div style={{ fontSize: 16, color: "#fff", opacity: .9 }}>{cardWord.meaning}</div>
@@ -4516,8 +4591,9 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
       if (!ok) return;
     }
     try {
+      const newId = `v${Date.now()}`;
       await supaInsert("vocab_entries", {
-        id: `v${Date.now()}`, class_id: cls.id,
+        id: newId, class_id: cls.id,
         word, meaning: vocabMean.trim(),
         type: vocabType, date: vocabDate,
         category: vocabCategory.trim() || null,
@@ -4525,6 +4601,17 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
       setVocabWord(""); setVocabMean("");
       onToast && onToast(`✅ ${vocabType === "grammar" ? "Дүрэм" : "Үг"} нэмэгдлээ`, "success");
       refreshAll && refreshAll();
+      // 🖼️ Зургийг арын дэвсгэрт хайж хадгална (зөвхөн үгэнд, дүрэмд биш)
+      // Энэ нь UI-г блоклохгүй — зураг олдвол дараа нь автомат харагдана
+      if (vocabType !== "grammar" && UNSPLASH_KEY) {
+        fetchWordImage(word, vocabMean.trim()).then(imgUrl => {
+          if (imgUrl) {
+            supaUpdate("vocab_entries", newId, { image_url: imgUrl }).then(() => {
+              refreshAll && refreshAll();
+            });
+          }
+        });
+      }
     } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
   };
 
