@@ -284,8 +284,11 @@ if (typeof window !== "undefined" && "speechSynthesis" in window) {
 }
 
 // ── GEMINI AI ─────────────────────────────────────────────────────────
-// ⚠️ API key-ийг доорх мөрөнд тавьна уу (https://aistudio.google.com)
-const GEMINI_API_KEY = ""; // ← ЭНД ӨӨРИЙН KEY-Г ТАВЬ
+// 🔒 API key-ийг Vercel Environment Variable-аас уншина (аюулгүй)
+// Vercel дээр нэр: VITE_GEMINI_API_KEY болгож тавина уу
+// Хэрэв localhost дээр турших бол доорх "" дотор түр тавьж болно
+const GEMINI_API_KEY =
+  (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) || "";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`;
 
 async function geminiCall(prompt, opts = {}) {
