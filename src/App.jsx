@@ -600,10 +600,14 @@ const ANIMATIONS = `
 @keyframes kGlow { 0%, 100% { filter: drop-shadow(0 0 8px rgba(255,167,38,0.6)) } 50% { filter: drop-shadow(0 0 20px rgba(255,167,38,0.9)) } }
 @keyframes kRise { 0% { opacity: 0; transform: translateY(40px) scale(0.9) } 100% { opacity: 1; transform: translateY(0) scale(1) } }
 @keyframes kSpinSlow { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes kCardSwipe { 0% { opacity: 0; transform: translateX(60px) scale(0.95) } 100% { opacity: 1; transform: translateX(0) scale(1) } }
+@keyframes kSlideInRight { 0% { opacity: 0; transform: translateX(40px) } 100% { opacity: 1; transform: translateX(0) } }
 .k-fade { animation: kFade .4s ease both }
 .k-slide { animation: kSlide .4s ease both }
 .k-slideup { animation: kSlideUp .4s ease both }
 .k-pop { animation: kPop .35s cubic-bezier(0.34, 1.56, 0.64, 1) both }
+.k-cardSwipe { animation: kCardSwipe .35s cubic-bezier(0.34, 1.2, 0.64, 1) both }
+.k-slideInRight { animation: kSlideInRight .4s ease both }
 .k-bounce { animation: kBounce 1.5s ease-in-out infinite }
 .k-float { animation: kFloat 3s ease-in-out infinite }
 .k-pulse { animation: kPulse 2s ease-in-out infinite }
@@ -1179,6 +1183,7 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
   const [sortBy, setSortBy] = useState("date_desc"); // date_desc | date_asc
   const [search, setSearch] = useState("");
   const [groupMode, setGroupMode] = useState("date"); // "date" | "category"
+  const [cardWord, setCardWord] = useState(null); // дэлгэрэнгүй харах үг (Hippo Cards маяг)
 
   // Бүх категориуд байгаа эсэх
   const hasCategories = useMemo(() =>
@@ -1404,38 +1409,38 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
                 <span>{g.isCategory ? g.date : `📅 ${g.date}`}</span>
                 <span style={{ fontSize: 10, color: t.text, opacity: .6, fontWeight: 600 }}>{g.items.length} зүйл</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {g.items.map(v => {
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {g.items.map((v, idx) => {
                   const status = wordStatus(v.word);
                   const isGr = v.type === "grammar";
-                  // 4 өнгөтэй харагдах:
-                  // - status.color (улаан/шар) — алдсан бол
-                  // - ногоон — сайн цээжилсэн (status байхгүй ч weakWords-д бусад үг байгаа бол)
-                  // - саарал — огт бэлдээгүй (weakWords нь бараг хоосон)
                   const hasAnyPractice = weakWords.length > 0;
                   const wordColor = status ? status.color : (hasAnyPractice ? "#66bb6a" : "#bbb");
+                  const emoji = getEmojiForWord(v.word, v.meaning);
                   return (
-                    <div key={v.id} onClick={() => speakKr(v.word)} className="k-press"
+                    <div key={v.id} onClick={() => setCardWord(v)}
+                      className="k-press k-slideInRight"
                       style={{
-                        padding: "8px 10px", borderRadius: 8, cursor: "pointer",
-                        background: isGr ? "#f5f0ff" : "#fffdf5",
-                        border: `1px solid ${isGr ? "#d4b8ff" : "#ffe082"}`,
-                        borderLeft: `4px solid ${wordColor}`,
-                        display: "flex", alignItems: "center", gap: 8,
-                      }} title="🔊 Дуудлага сонсох">
-                      <div style={{ flexShrink: 0, width: 22, textAlign: "center" }}>
-                        {isGr ? "📖" : "📚"}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 800, fontSize: 13, color: isGr ? "#7c3aed" : "#b8860b" }}>{v.word}</div>
-                        <div style={{ fontSize: 11, color: "#555", marginTop: 1 }}>{v.meaning}</div>
-                      </div>
+                        padding: "12px 10px", borderRadius: 16, cursor: "pointer",
+                        background: `linear-gradient(160deg, #fff, ${isGr ? "#f5f0ff" : "#fffdf5"})`,
+                        border: `2px solid ${isGr ? "#e0d0ff" : "#ffe8a8"}`,
+                        borderBottom: `4px solid ${wordColor}`,
+                        animationDelay: `${idx * 0.03}s`,
+                        display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center",
+                        minHeight: 110, justifyContent: "center", position: "relative",
+                      }}>
                       {status && (
-                        <div style={{ fontSize: 9, color: status.color, fontWeight: 700, background: "#fff", padding: "2px 6px", borderRadius: 6 }}>
+                        <div style={{ position: "absolute", top: 6, right: 6, fontSize: 8, color: "#fff", fontWeight: 700, background: status.color, padding: "2px 5px", borderRadius: 5 }}>
                           {status.label}
                         </div>
                       )}
-                      <span style={{ fontSize: 12, opacity: .4 }}>🔊</span>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: "50%",
+                        background: isGr ? "#ede0ff" : "#fff3d0",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 24, marginBottom: 6,
+                      }}>{isGr ? "📖" : emoji}</div>
+                      <div style={{ fontWeight: 900, fontSize: 16, color: isGr ? "#7c3aed" : "#b8860b", marginBottom: 2 }}>{v.word}</div>
+                      <div style={{ fontSize: 11, color: "#666", lineHeight: 1.3 }}>{v.meaning}</div>
                     </div>
                   );
                 })}
@@ -1444,6 +1449,58 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
           ))}
         </div>
       )}
+
+      {/* 🎴 Дэлгэрэнгүй карт (Hippo Cards маяг) */}
+      {cardWord && (() => {
+        const isGr = cardWord.type === "grammar";
+        const emoji = getEmojiForWord(cardWord.word, cardWord.meaning);
+        const example = buildSentenceFromTemplate(cardWord.word, cardWord.meaning);
+        const exampleKr = example.parts.map(p => p.t).join("");
+        return (
+          <div onClick={() => setCardWord(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()} className="k-pop"
+              style={{ background: "#fff", borderRadius: 28, maxWidth: 380, width: "100%", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              {/* Дээд хэсэг — том emoji + gradient */}
+              <div style={{ background: `linear-gradient(160deg, ${isGr ? "#9c6bff" : t.accent}, ${isGr ? "#7c3aed" : t.accent}cc)`, padding: "32px 24px", textAlign: "center", position: "relative" }}>
+                <button onClick={() => setCardWord(null)}
+                  style={{ position: "absolute", top: 14, right: 14, background: "rgba(255,255,255,0.3)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", fontSize: 16, color: "#fff", fontWeight: 700 }}>✕</button>
+                <div style={{ width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, margin: "0 auto 14px" }}>
+                  {isGr ? "📖" : emoji}
+                </div>
+                <div style={{ fontSize: 38, fontWeight: 900, color: "#fff", marginBottom: 4 }}>{cardWord.word}</div>
+                <div style={{ fontSize: 16, color: "#fff", opacity: .9 }}>{cardWord.meaning}</div>
+              </div>
+              {/* Доод хэсэг */}
+              <div style={{ padding: "20px 24px" }}>
+                <button onClick={() => speakKr(cardWord.word)}
+                  style={{ width: "100%", background: t.soft, color: t.accent, border: "none", borderRadius: 14, padding: 12, fontSize: 15, cursor: "pointer", fontWeight: 800, marginBottom: 14 }}>
+                  🔊 Дуудлага сонсох
+                </button>
+                {/* Жишээ өгүүлбэр */}
+                <div onClick={() => speakKr(exampleKr)}
+                  style={{ background: `linear-gradient(135deg, ${t.soft}, #fff)`, borderRadius: 14, padding: 14, cursor: "pointer", border: `1px solid ${t.border}` }}>
+                  <div style={{ fontSize: 10, color: t.accent, fontWeight: 800, marginBottom: 6, letterSpacing: 1 }}>✍️ ЖИШЭЭ ӨГҮҮЛБЭР 🔊</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "#1a1a2e", marginBottom: 4, lineHeight: 1.4 }}>{exampleKr}</div>
+                  <div style={{ fontSize: 13, color: "#666" }}>{example.mn}</div>
+                </div>
+                {cardWord.category && (
+                  <div style={{ marginTop: 12, textAlign: "center" }}>
+                    <span style={{ background: "#f3e5f5", color: "#7c3aed", padding: "4px 12px", borderRadius: 10, fontSize: 12, fontWeight: 700 }}>
+                      🏷️ {cardWord.category}
+                    </span>
+                  </div>
+                )}
+                {cardWord.date && (
+                  <div style={{ marginTop: 10, textAlign: "center", fontSize: 11, color: "#999" }}>
+                    📅 {cardWord.date}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3083,50 +3140,97 @@ function WalkingBuddies({ progress, lostItem }) {
 function FlashcardExercise({ current, t, onNext }) {
   const [flipped, setFlipped] = useState(false);
   const [emoji, setEmoji] = useState("📝");
+  const [example, setExample] = useState(null);
   useEffect(() => {
     setFlipped(false);
-    // Offline emoji эхлэлд харуулна, AI-аар сайжруулах
     const offEmoji = getEmojiForWord(current.target.word, current.target.meaning);
     setEmoji(offEmoji);
     if (offEmoji === "📝") {
       getEmojiByAI(current.target.word, current.target.meaning).then(e => setEmoji(e));
     }
+    // Жишээ өгүүлбэр (template-аар, AI-гүй)
+    setExample(buildSentenceFromTemplate(current.target.word, current.target.meaning));
+    // Автомат дуудах
+    const tm = setTimeout(() => speakKr(current.target.word), 350);
+    return () => clearTimeout(tm);
   }, [current]);
+
+  const exampleKr = example ? example.parts.map(p => p.t).join("") : "";
+
   return (
-    <div className="k-pop" key={current.target.word}>
+    <div className="k-cardSwipe" key={current.target.word}>
+      {/* 🎴 Hippo Cards маягийн том карт — 3D flip */}
       <div onClick={() => setFlipped(f => !f)} style={{
-        background: flipped ? t.accent : "#fff",
-        color: flipped ? "#fff" : t.text,
-        borderRadius: 22, padding: "30px 24px", textAlign: "center", cursor: "pointer",
-        minHeight: 240, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        border: `3px solid ${t.border}`, boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
-        transition: "all 0.4s",
+        position: "relative", cursor: "pointer", minHeight: 360,
+        perspective: 1000,
       }}>
-        <div style={{ fontSize: 11, opacity: .7, fontWeight: 700, marginBottom: 8, letterSpacing: 1 }}>
-          {flipped ? "ХАРИУ" : "ҮГ"}
-        </div>
-        {/* Emoji sticker */}
-        <div style={{ fontSize: 50, marginBottom: 8, lineHeight: 1, filter: flipped ? "brightness(1.2)" : "none" }}>
-          {emoji}
-        </div>
-        <div style={{ fontSize: flipped ? 30 : 38, fontWeight: 900, marginBottom: 12 }}>
-          {flipped ? current.target.meaning : current.target.word}
-        </div>
-        {!flipped && (
-          <button onClick={e => { e.stopPropagation(); speakKr(current.target.word); }}
-            style={{ background: t.soft, color: t.accent, border: "none", borderRadius: 12, padding: "8px 14px", fontSize: 16, cursor: "pointer", fontWeight: 700 }}>
-            🔊 Сонсох
-          </button>
-        )}
-        <div style={{ fontSize: 10, opacity: .6, marginTop: 14, fontWeight: 600 }}>
-          {flipped ? "Дахин дарж эргүүл" : "👆 Дарж эргүүл"}
+        <div style={{
+          position: "relative", width: "100%", minHeight: 360,
+          transition: "transform 0.5s", transformStyle: "preserve-3d",
+          transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+        }}>
+          {/* НҮҮР ТАЛ — солонгос үг */}
+          <div style={{
+            position: flipped ? "absolute" : "relative", inset: 0,
+            backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden",
+            background: `linear-gradient(160deg, #fff 0%, ${t.soft} 100%)`,
+            borderRadius: 28, padding: "32px 24px", textAlign: "center",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            border: `2px solid ${t.border}`, boxShadow: "0 12px 32px rgba(0,0,0,0.1)",
+          }}>
+            {/* Том emoji дугуй */}
+            <div style={{
+              width: 130, height: 130, borderRadius: "50%",
+              background: `linear-gradient(135deg, ${t.accent}22, ${t.accent}11)`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 70, marginBottom: 18, boxShadow: `0 8px 20px ${t.accent}22`,
+            }}>{emoji}</div>
+            <div style={{ fontSize: 42, fontWeight: 900, color: "#1a1a2e", marginBottom: 14, lineHeight: 1.1 }}>
+              {current.target.word}
+            </div>
+            <button onClick={e => { e.stopPropagation(); speakKr(current.target.word); }}
+              style={{ background: t.accent, color: "#fff", border: "none", borderRadius: 14, padding: "10px 20px", fontSize: 16, cursor: "pointer", fontWeight: 700, boxShadow: `0 4px 0 ${t.border}` }}>
+              🔊 Сонсох
+            </button>
+            <div style={{ fontSize: 11, opacity: .5, marginTop: 16, fontWeight: 600 }}>👆 Дарж утгыг харах</div>
+          </div>
+
+          {/* АРД ТАЛ — монгол утга + жишээ */}
+          <div style={{
+            position: "absolute", inset: 0,
+            backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden",
+            transform: "rotateY(180deg)",
+            background: `linear-gradient(160deg, ${t.accent} 0%, ${t.accent}dd 100%)`,
+            borderRadius: 28, padding: "28px 24px", textAlign: "center",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            border: `2px solid ${t.accent}`, boxShadow: "0 12px 32px rgba(0,0,0,0.15)",
+          }}>
+            <div style={{ fontSize: 44, marginBottom: 10 }}>{emoji}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#fff", opacity: .85, marginBottom: 6 }}>
+              {current.target.word}
+            </div>
+            <div style={{ fontSize: 30, fontWeight: 900, color: "#fff", marginBottom: 16, lineHeight: 1.2 }}>
+              {current.target.meaning}
+            </div>
+            {/* Жишээ өгүүлбэр */}
+            {example && (
+              <div onClick={e => { e.stopPropagation(); speakKr(exampleKr); }}
+                style={{ background: "rgba(255,255,255,0.2)", borderRadius: 14, padding: "10px 14px", marginTop: 4, cursor: "pointer" }}>
+                <div style={{ fontSize: 10, color: "#fff", opacity: .7, fontWeight: 700, marginBottom: 4 }}>✍️ ЖИШЭЭ 🔊</div>
+                <div style={{ fontSize: 15, color: "#fff", fontWeight: 700, marginBottom: 3 }}>{exampleKr}</div>
+                <div style={{ fontSize: 12, color: "#fff", opacity: .8 }}>{example.mn}</div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        <button onClick={() => onNext(false)} style={{ flex: 1, background: "#ffcdd2", color: "#c62828", border: "none", borderRadius: 14, padding: 14, fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 0 #ef9a9a" }}>
-          😅 Мэдэхгүй
+
+      {/* Мэднэ / Мэдэхгүй товч */}
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <button onClick={() => onNext(false)} style={{ flex: 1, background: "#fff", color: "#ef5350", border: "2px solid #ffcdd2", borderRadius: 16, padding: 15, fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
+          😅 Дахин үзэх
         </button>
-        <button onClick={() => onNext(true)} style={{ flex: 1, background: "#c8e6c9", color: "#2e7d32", border: "none", borderRadius: 14, padding: 14, fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 0 #a5d6a7" }}>
+        <button onClick={() => onNext(true)} style={{ flex: 1, background: "#c8e6c9", color: "#2e7d32", border: "none", borderRadius: 16, padding: 15, fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 0 #a5d6a7" }}>
           ✅ Мэднэ
         </button>
       </div>
@@ -3143,19 +3247,21 @@ function MCExercise({ current, t, questionKey, answerKey, label, noAudio, showRe
     setSelected(opt);
     setTimeout(() => onSubmit(opt), 200);
   };
+  const emoji = getEmojiForWord(current.target.word, current.target.meaning);
   return (
-    <div key={current.target.word}>
-      <div style={{ background: "#fff", borderRadius: 18, padding: "30px 20px", textAlign: "center", marginBottom: 14, border: `2px solid ${t.border}` }}>
-        <div style={{ fontSize: 11, opacity: .6, fontWeight: 700, marginBottom: 8 }}>{label}</div>
-        <div style={{ fontSize: 38, fontWeight: 900, color: t.text, marginBottom: 12, lineHeight: 1.2 }}>{current.target[questionKey]}</div>
+    <div className="k-cardSwipe" key={current.target.word}>
+      <div style={{ background: `linear-gradient(160deg, #fff, ${t.soft})`, borderRadius: 24, padding: "28px 20px", textAlign: "center", marginBottom: 16, border: `2px solid ${t.border}`, boxShadow: "0 8px 24px rgba(0,0,0,0.06)" }}>
+        <div style={{ fontSize: 10, opacity: .5, fontWeight: 800, marginBottom: 10, letterSpacing: 1 }}>{label}</div>
+        <div style={{ width: 70, height: 70, borderRadius: "50%", background: `${t.accent}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 38, margin: "0 auto 12px" }}>{emoji}</div>
+        <div style={{ fontSize: 36, fontWeight: 900, color: t.text, marginBottom: 12, lineHeight: 1.2 }}>{current.target[questionKey]}</div>
         {!noAudio && (
           <button onClick={() => speakKr(current.target.word)}
-            style={{ background: t.soft, color: t.accent, border: "none", borderRadius: 12, padding: "8px 16px", fontSize: 14, cursor: "pointer", fontWeight: 700 }}>
+            style={{ background: t.accent, color: "#fff", border: "none", borderRadius: 12, padding: "8px 18px", fontSize: 14, cursor: "pointer", fontWeight: 700, boxShadow: `0 3px 0 ${t.border}` }}>
             🔊 Сонсох
           </button>
         )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         {current.options.map((opt, i) => {
           const isSel = selected === opt;
           const isCorrect = showResult && opt === current.target[answerKey];
@@ -3168,10 +3274,11 @@ function MCExercise({ current, t, questionKey, answerKey, label, noAudio, showRe
             <div key={i} onClick={() => handleClick(opt)} className="k-press"
               style={{
                 background: bg, color: col, border: `2px solid ${border}`,
-                borderRadius: 14, padding: "16px 12px", fontSize: 15, fontWeight: 700,
+                borderRadius: 16, padding: "18px 12px", fontSize: 16, fontWeight: 700,
                 textAlign: "center", cursor: selected !== null ? "default" : "pointer",
                 transition: "all 0.2s", animation: `kSlideUp .3s ease ${i * 0.05}s both`,
-              }}>{opt}</div>
+                boxShadow: (isCorrect || isWrong) ? "none" : "0 3px 8px rgba(0,0,0,0.04)",
+              }}>{isCorrect && "✅ "}{isWrong && "❌ "}{opt}</div>
           );
         })}
       </div>
@@ -3371,6 +3478,8 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
   const [startTime, setStartTime] = useState(null);
   const [lostItem, setLostItem] = useState(false);
   const [selectedDate, setSelectedDate] = useState("all"); // "all" эсвэл "YYYY-MM-DD"
+  const [scopeMode, setScopeMode] = useState("date"); // "date" | "category"
+  const [selectedCategory, setSelectedCategory] = useState("all"); // "all" эсвэл сэдвийн нэр
   const [missedWords, setMissedWords] = useState([]); // алдсан үгсийн жагсаалт
   const [selectedGrammar, setSelectedGrammar] = useState(null); // sentence дасгалд сонгосон дүрэм
   const [showGrammarPick, setShowGrammarPick] = useState(false); // дүрэм сонгох popup
@@ -3386,16 +3495,33 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
     return dates;
   }, [vocabs, grammars]);
 
+  // Бүх боломжит сэдвүүд
+  const availableCategories = useMemo(() => {
+    const all = [...(vocabs || []), ...(grammars || [])];
+    const cats = [...new Set(all.filter(v => v.category && v.category.trim()).map(v => v.category.trim()))].sort();
+    return cats;
+  }, [vocabs, grammars]);
+
+  const hasCategories = availableCategories.length > 0;
+
   const allWords = useMemo(() => {
     let v = (vocabs || []).filter(x => x.word && x.meaning);
     let g = (grammars || []).filter(x => x.word && x.meaning);
-    // Filter by selected date
-    if (selectedDate !== "all") {
-      v = v.filter(x => x.date === selectedDate);
-      g = g.filter(x => x.date === selectedDate);
+    if (scopeMode === "category") {
+      // Сэдвээр шүүх
+      if (selectedCategory !== "all") {
+        v = v.filter(x => (x.category || "").trim() === selectedCategory);
+        g = g.filter(x => (x.category || "").trim() === selectedCategory);
+      }
+    } else {
+      // Өдрөөр шүүх
+      if (selectedDate !== "all") {
+        v = v.filter(x => x.date === selectedDate);
+        g = g.filter(x => x.date === selectedDate);
+      }
     }
     return [...v, ...g];
-  }, [vocabs, grammars, selectedDate]);
+  }, [vocabs, grammars, selectedDate, scopeMode, selectedCategory]);
 
   const startExercise = (type) => {
     if (allWords.length < 1) return;
@@ -3507,34 +3633,88 @@ function PracticeStudio({ vocabs, grammars, t, level, onClose, onComplete, title
           <div style={{ fontSize: 11, opacity: .8, marginTop: 4 }}>📚 {allWords.length} үг бэлэн</div>
         </div>
 
-        {/* Өдөр сонгох tab */}
-        {availableDates.length > 0 && (
+        {/* Өдөр / Сэдэв горим сонгох */}
+        {(availableDates.length > 0 || hasCategories) && (
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 11, color: t.text, opacity: .7, fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>
-              📅 АЛЬ ӨДРИЙН ҮГИЙГ БЭЛДЭХ ВЭ?
-            </div>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", overflowX: "auto", paddingBottom: 4 }}>
-              <button onClick={() => setSelectedDate("all")} style={{
-                background: selectedDate === "all" ? t.accent : "#fff",
-                color: selectedDate === "all" ? "#fff" : t.text,
-                border: `2px solid ${selectedDate === "all" ? t.accent : t.border}`,
-                borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 800, cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}>📋 Бүгд</button>
-              {availableDates.map(d => {
-                const cnt = [...(vocabs || []), ...(grammars || [])].filter(v => v.date === d).length;
-                const isSel = selectedDate === d;
-                return (
-                  <button key={d} onClick={() => setSelectedDate(d)} style={{
-                    background: isSel ? t.accent : "#fff",
-                    color: isSel ? "#fff" : t.text,
-                    border: `2px solid ${isSel ? t.accent : t.border}`,
-                    borderRadius: 10, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+            {/* Горим солих товч (сэдэв байгаа үед) */}
+            {hasCategories && (
+              <div style={{ display: "flex", gap: 5, marginBottom: 8, background: t.soft, borderRadius: 10, padding: 3 }}>
+                <button onClick={() => setScopeMode("date")} style={{
+                  flex: 1, padding: "6px 4px", borderRadius: 8, border: "none",
+                  background: scopeMode === "date" ? "#fff" : "transparent",
+                  color: scopeMode === "date" ? t.accent : t.text,
+                  fontWeight: scopeMode === "date" ? 800 : 600, fontSize: 11, cursor: "pointer",
+                }}>📅 Өдрөөр</button>
+                <button onClick={() => setScopeMode("category")} style={{
+                  flex: 1, padding: "6px 4px", borderRadius: 8, border: "none",
+                  background: scopeMode === "category" ? "#fff" : "transparent",
+                  color: scopeMode === "category" ? t.accent : t.text,
+                  fontWeight: scopeMode === "category" ? 800 : 600, fontSize: 11, cursor: "pointer",
+                }}>🏷️ Сэдвээр</button>
+              </div>
+            )}
+
+            {/* Өдөр сонгох */}
+            {scopeMode === "date" && availableDates.length > 0 && (
+              <>
+                <div style={{ fontSize: 11, color: t.text, opacity: .7, fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>
+                  📅 АЛЬ ӨДРИЙН ҮГИЙГ БЭЛДЭХ ВЭ?
+                </div>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", overflowX: "auto", paddingBottom: 4 }}>
+                  <button onClick={() => setSelectedDate("all")} style={{
+                    background: selectedDate === "all" ? t.accent : "#fff",
+                    color: selectedDate === "all" ? "#fff" : t.text,
+                    border: `2px solid ${selectedDate === "all" ? t.accent : t.border}`,
+                    borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 800, cursor: "pointer",
                     whiteSpace: "nowrap",
-                  }}>{d.slice(5)} <span style={{ opacity: .7 }}>({cnt})</span></button>
-                );
-              })}
-            </div>
+                  }}>📋 Бүгд</button>
+                  {availableDates.map(d => {
+                    const cnt = [...(vocabs || []), ...(grammars || [])].filter(v => v.date === d).length;
+                    const isSel = selectedDate === d;
+                    return (
+                      <button key={d} onClick={() => setSelectedDate(d)} style={{
+                        background: isSel ? t.accent : "#fff",
+                        color: isSel ? "#fff" : t.text,
+                        border: `2px solid ${isSel ? t.accent : t.border}`,
+                        borderRadius: 10, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}>{d.slice(5)} <span style={{ opacity: .7 }}>({cnt})</span></button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* Сэдэв сонгох */}
+            {scopeMode === "category" && hasCategories && (
+              <>
+                <div style={{ fontSize: 11, color: t.text, opacity: .7, fontWeight: 700, marginBottom: 6, letterSpacing: .5 }}>
+                  🏷️ АЛЬ СЭДВИЙГ БЭЛДЭХ ВЭ?
+                </div>
+                <div style={{ display: "flex", gap: 5, flexWrap: "wrap", overflowX: "auto", paddingBottom: 4 }}>
+                  <button onClick={() => setSelectedCategory("all")} style={{
+                    background: selectedCategory === "all" ? t.accent : "#fff",
+                    color: selectedCategory === "all" ? "#fff" : t.text,
+                    border: `2px solid ${selectedCategory === "all" ? t.accent : t.border}`,
+                    borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 800, cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}>📋 Бүгд</button>
+                  {availableCategories.map(cat => {
+                    const cnt = [...(vocabs || []), ...(grammars || [])].filter(v => (v.category || "").trim() === cat).length;
+                    const isSel = selectedCategory === cat;
+                    return (
+                      <button key={cat} onClick={() => setSelectedCategory(cat)} style={{
+                        background: isSel ? t.accent : "#fff",
+                        color: isSel ? "#fff" : t.text,
+                        border: `2px solid ${isSel ? t.accent : t.border}`,
+                        borderRadius: 10, padding: "6px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}>{cat} <span style={{ opacity: .7 }}>({cnt})</span></button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -3925,52 +4105,37 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
         </div>
       )}
 
-      {/* Personal info — зөвхөн сүпэр-админ + сурагч өөрөө харна */}
-      {(isSuperAdmin || (!isAdmin)) && (
-        <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
-          <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📋 Мэдээлэл</div>
-          <div style={{ display: "grid", gap: 6, fontSize: 12, color: t.text }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ opacity: .6 }}>📞 Утас:</span>
-              <span style={{ fontWeight: 700 }}>{s.phone || "—"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ opacity: .6 }}>📧 И-мэйл:</span>
-              <span style={{ fontWeight: 700, fontSize: 11 }}>{s.email || "—"}</span>
-            </div>
-            {isSuperAdmin && s.rd && (
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ opacity: .6 }}>🆔 Регистр:</span>
-                <span style={{ fontWeight: 700, fontSize: 11 }}>{s.rd}</span>
-              </div>
-            )}
-            {s.enroll_date && (
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ opacity: .6 }}>📅 Бүртгүүлсэн:</span>
-                <span style={{ fontWeight: 700 }}>{fmtDate(s.enroll_date)} ({daysEnrolled} өдөр)</span>
-              </div>
-            )}
+      {/* Personal info — багш, админ, сурагч өөрөө харна. РД зөвхөн админд */}
+      <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
+        <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📋 Мэдээлэл</div>
+        <div style={{ display: "grid", gap: 6, fontSize: 12, color: t.text }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ opacity: .6 }}>📞 Утас:</span>
+            <span style={{ fontWeight: 700 }}>{s.phone || "—"}</span>
           </div>
-        </div>
-      )}
-
-      {/* Энгийн багшид: зөвхөн нэр, түвшин, ангид байгаа эсэх */}
-      {isAdmin && !isSuperAdmin && (
-        <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
-          <div style={{ fontWeight: 800, fontSize: 13, color: t.text, marginBottom: 8 }}>📋 Мэдээлэл</div>
-          <div style={{ display: "grid", gap: 6, fontSize: 12, color: t.text }}>
-            {s.enroll_date && (
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ opacity: .6 }}>📧 И-мэйл:</span>
+            <span style={{ fontWeight: 700, fontSize: 11 }}>{s.email || "—"}</span>
+          </div>
+          {isSuperAdmin && s.rd && (
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ opacity: .6 }}>🆔 Регистр:</span>
+              <span style={{ fontWeight: 700, fontSize: 11 }}>{s.rd}</span>
+            </div>
+          )}
+          {s.enroll_date && (
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ opacity: .6 }}>📅 Бүртгүүлсэн:</span>
                 <span style={{ fontWeight: 700 }}>{fmtDate(s.enroll_date)} ({daysEnrolled} өдөр)</span>
               </div>
             )}
+          {isAdmin && !isSuperAdmin && (
             <div style={{ fontSize: 10, opacity: .5, fontStyle: "italic", marginTop: 4 }}>
-              🔒 Утас, и-мэйл, РД зөвхөн сүпэр админд харагдана
+              🔒 Регистрийн дугаар зөвхөн сүпэр админд харагдана
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Payment info — бүх хэрэглэгчид харуулна */}
       {((s.total_fee || 0) > 0 || s.next_due) && (
@@ -4525,15 +4690,27 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
 
           {/* 🏷️ Сэдэв/категори (заавал биш) */}
           <div style={{ marginBottom: 8 }}>
-            <input value={vocabCategory} onChange={e => setVocabCategory(e.target.value)}
-              placeholder="🏷️ Сэдэв (заавал биш): Хичээлийн хэрэгсэл, Хоол, Гэр бүл..."
-              list="vocab-categories"
-              style={{ ...INP, fontSize: 12, padding: "8px 10px" }} />
+            <div style={{ position: "relative" }}>
+              <input value={vocabCategory} onChange={e => setVocabCategory(e.target.value)}
+                placeholder="🏷️ Сэдэв (заавал биш): Хичээлийн хэрэгсэл, Хоол, Гэр бүл..."
+                list="vocab-categories"
+                style={{ ...INP, fontSize: 12, padding: "8px 10px", paddingRight: vocabCategory ? 36 : 10 }} />
+              {vocabCategory && (
+                <button onClick={() => setVocabCategory("")}
+                  title="Сэдвийг арилгах"
+                  style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", background: "#eee", border: "none", borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 12, color: "#666", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+              )}
+            </div>
             <datalist id="vocab-categories">
               {[...new Set(classVocabs.map(v => v.category).filter(Boolean))].map(cat => (
                 <option key={cat} value={cat} />
               ))}
             </datalist>
+            {vocabCategory && (
+              <div style={{ fontSize: 10, color: "#7c3aed", marginTop: 3 }}>
+                💡 Дараагийн үгс ч "{vocabCategory}" сэдэвт орно. Арилгахыг хүсвэл ✕ дар.
+              </div>
+            )}
           </div>
 
           {/* Сонгосон өдрийн үгс — checkbox-той + copy товч */}
@@ -4548,15 +4725,12 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
                   <div style={{ fontSize: 11, color: "#888", fontWeight: 700 }}>{vocabDate} өдрийн үгс ({dayVocabs.length})</div>
                   <div style={{ display: "flex", gap: 4 }}>
                     <button onClick={() => {
-                      if (allSelected) {
-                        const ns = new Set(selectedVocabIds);
-                        dayVocabs.forEach(v => ns.delete(v.id));
-                        setSelectedVocabIds(ns);
-                      } else {
-                        const ns = new Set(selectedVocabIds);
-                        dayVocabs.forEach(v => ns.add(v.id));
-                        setSelectedVocabIds(ns);
-                      }
+                      setSelectedVocabIds(prev => {
+                        const ns = new Set(prev);
+                        if (allSelected) dayVocabs.forEach(v => ns.delete(v.id));
+                        else dayVocabs.forEach(v => ns.add(v.id));
+                        return ns;
+                      });
                     }} style={{ ...btn("#fff", "#1976d2", "#90caf9"), padding: "4px 8px", fontSize: 11 }}>
                       {allSelected ? "✕ Бүгдийг" : "✓ Бүгдийг"}
                     </button>
@@ -4588,9 +4762,11 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
                     const isSel = selectedVocabIds.has(v.id);
                     return (
                       <div key={v.id} onClick={() => {
-                        const ns = new Set(selectedVocabIds);
-                        if (isSel) ns.delete(v.id); else ns.add(v.id);
-                        setSelectedVocabIds(ns);
+                        setSelectedVocabIds(prev => {
+                          const ns = new Set(prev);
+                          if (ns.has(v.id)) ns.delete(v.id); else ns.add(v.id);
+                          return ns;
+                        });
                       }} className="k-press"
                         style={{
                           background: isSel ? "#e3f2fd" : "#fff",
@@ -5663,7 +5839,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
 
 // ── Багш сурагч харах AdminStudentDetail ──────────────────────
 // ── AllVocabsManager — Багш/Сүпэр-Админд: бүх анги, бүх үг, copy/print ──
-function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast }) {
+function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast, isSuperAdmin = false, teachers = [] }) {
   const [selClsId, setSelClsId] = useState("all");
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [showCopyTo, setShowCopyTo] = useState(false);
@@ -5768,6 +5944,31 @@ td.type { width: 60px; text-align: center; font-size: 11px }
         </select>
       </div>
 
+      {/* 👑 Админд: сэдвийн статистик (хэдэн үг ямар сэдэвт) */}
+      {isSuperAdmin && (() => {
+        const catMap = {};
+        filtered.forEach(v => {
+          const cat = (v.category && v.category.trim()) || "🏷️ Ангилаагүй";
+          catMap[cat] = (catMap[cat] || 0) + 1;
+        });
+        const cats = Object.entries(catMap).sort((a, b) => b[1] - a[1]);
+        if (cats.length === 0) return null;
+        return (
+          <div style={{ marginBottom: 10, background: "#f3e5f5", borderRadius: 12, padding: 10, border: "1px solid #d4b8ff" }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", marginBottom: 6 }}>
+              📊 СЭДВИЙН ТОЙМ ({cats.length} сэдэв)
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {cats.map(([cat, cnt]) => (
+                <span key={cat} style={{ background: "#fff", color: "#7c3aed", padding: "3px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, border: "1px solid #d4b8ff" }}>
+                  {cat}: <b>{cnt}</b>
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Selection toolbar */}
       {filtered.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, background: "#e3f2fd", borderRadius: 10, padding: "6px 10px" }}>
@@ -5821,9 +6022,11 @@ td.type { width: 60px; text-align: center; font-size: 11px }
                 const cls = classes.find(c => c.id === v.class_id);
                 return (
                   <div key={v.id} onClick={() => {
-                    const ns = new Set(selectedIds);
-                    if (isSel) ns.delete(v.id); else ns.add(v.id);
-                    setSelectedIds(ns);
+                    setSelectedIds(prev => {
+                      const ns = new Set(prev);
+                      if (ns.has(v.id)) ns.delete(v.id); else ns.add(v.id);
+                      return ns;
+                    });
                   }} style={{
                     padding: "6px 10px", borderRadius: 8, cursor: "pointer",
                     background: isSel ? "#e3f2fd" : (isGr ? "#f5f0ff" : "#fffdf5"),
@@ -6710,7 +6913,9 @@ export default function App() {
         {/* Бүх үгс — бүх ангиар filter + copy боломжтой */}
         {showAllVocab && (
           <Overlay onClose={() => setShowAllVocab(false)} maxW={560}>
-            <AllVocabsManager classes={visibleClasses} vocabEntries={vocabEntries}
+            <AllVocabsManager classes={visibleClasses}
+              vocabEntries={vocabEntries.filter(v => visibleClasses.some(c => c.id === v.class_id))}
+              isSuperAdmin={isSuperAdmin} teachers={teachers}
               onClose={() => setShowAllVocab(false)}
               onChanged={() => loadAll(true)} onToast={showToast} />
           </Overlay>
