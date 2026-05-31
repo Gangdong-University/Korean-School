@@ -516,6 +516,19 @@ async function fetchWordImage(word, meaning) {
   }
 }
 
+// Үгийн зургийн URL гаргах: хадгалсан image_url эсвэл search_keyword-оор LoremFlickr
+// LoremFlickr нь API key шаардахгүй, шууд ажиллана: loremflickr.com/400/300/{keyword}
+function getWordImageUrl(v) {
+  if (!v) return null;
+  if (v.type === "grammar") return null; // дүрэмд зураг хэрэггүй
+  if (v.image_url) return v.image_url; // Unsplash-аас хадгалсан байвал тэрийг эхэлж
+  if (v.search_keyword) {
+    const kw = encodeURIComponent(String(v.search_keyword).trim());
+    return `https://loremflickr.com/400/300/${kw}`;
+  }
+  return null;
+}
+
 // AI-аар өгүүлбэр үүсгэх (cache)
 const _sentenceCache = {};
 async function generateSentence(word, meaning, level = 0) {
@@ -1511,8 +1524,8 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 24, marginBottom: 6, overflow: "hidden",
                       }}>
-                        {!isGr && v.image_url
-                          ? <img src={v.image_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                        {getWordImageUrl(v)
+                          ? <img src={getWordImageUrl(v)} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" loading="lazy" />
                           : (isGr ? "📖" : emoji)}
                       </div>
                       <div style={{ fontWeight: 900, fontSize: 16, color: isGr ? "#7c3aed" : "#b8860b", marginBottom: 2 }}>{v.word}</div>
@@ -1530,8 +1543,11 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
       {cardWord && (() => {
         const isGr = cardWord.type === "grammar";
         const emoji = getEmojiForWord(cardWord.word, cardWord.meaning);
-        const example = buildSentenceFromTemplate(cardWord.word, cardWord.meaning);
-        const exampleKr = example.parts.map(p => p.t).join("");
+        // Жишээ өгүүлбэр: JSON-оор оруулсан байвал тэрийг, үгүй бол template
+        const hasJsonExample = cardWord.example_kr && cardWord.example_mn;
+        const tmpl = buildSentenceFromTemplate(cardWord.word, cardWord.meaning);
+        const exampleKr = hasJsonExample ? cardWord.example_kr : tmpl.parts.map(p => p.t).join("");
+        const exampleMn = hasJsonExample ? cardWord.example_mn : tmpl.mn;
         return (
           <div onClick={() => setCardWord(null)}
             style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -1542,8 +1558,8 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
                 <button onClick={() => setCardWord(null)}
                   style={{ position: "absolute", top: 14, right: 14, background: "rgba(255,255,255,0.3)", border: "none", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", fontSize: 16, color: "#fff", fontWeight: 700 }}>✕</button>
                 <div style={{ width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 56, margin: "0 auto 14px", overflow: "hidden" }}>
-                  {!isGr && cardWord.image_url
-                    ? <img src={cardWord.image_url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
+                  {getWordImageUrl(cardWord)
+                    ? <img src={getWordImageUrl(cardWord)} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="" />
                     : (isGr ? "📖" : emoji)}
                 </div>
                 <div style={{ fontSize: 38, fontWeight: 900, color: "#fff", marginBottom: 4 }}>{cardWord.word}</div>
@@ -1560,7 +1576,7 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
                   style={{ background: `linear-gradient(135deg, ${t.soft}, #fff)`, borderRadius: 14, padding: 14, cursor: "pointer", border: `1px solid ${t.border}` }}>
                   <div style={{ fontSize: 10, color: t.accent, fontWeight: 800, marginBottom: 6, letterSpacing: 1 }}>✍️ ЖИШЭЭ ӨГҮҮЛБЭР 🔊</div>
                   <div style={{ fontSize: 17, fontWeight: 700, color: "#1a1a2e", marginBottom: 4, lineHeight: 1.4 }}>{exampleKr}</div>
-                  <div style={{ fontSize: 13, color: "#666" }}>{example.mn}</div>
+                  <div style={{ fontSize: 13, color: "#666" }}>{exampleMn}</div>
                 </div>
                 {cardWord.category && (
                   <div style={{ marginTop: 12, textAlign: "center" }}>
@@ -4524,6 +4540,10 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
   const [bulkMn, setBulkMn] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkTranslating, setBulkTranslating] = useState(false);
+  // JSON bulk upload (жишээ өгүүлбэр + зургийн түлхүүртэй)
+  const [showJsonBulk, setShowJsonBulk] = useState(false);
+  const [jsonText, setJsonText] = useState("");
+  const [jsonSaving, setJsonSaving] = useState(false);
   // New student
   const [ns, setNs] = useState({ name: "", phone: "", email: "", password: "", level: 0 });
 
@@ -4698,6 +4718,63 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
     setBulkSaving(false);
   };
 
+  // JSON bulk upload — word_kr, word_mn, example_kr, example_mn, search_keyword
+  const doJsonBulkAdd = async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText.trim());
+    } catch (e) {
+      onToast && onToast("❌ JSON буруу байна. Форматаа шалгана уу.", "error");
+      return;
+    }
+    if (!Array.isArray(parsed)) {
+      onToast && onToast("❌ JSON нь массив [...] байх ёстой", "error");
+      return;
+    }
+    // word_kr + word_mn заавал байх ёстой
+    const valid = parsed.filter(r => r && r.word_kr && r.word_mn);
+    if (valid.length === 0) {
+      onToast && onToast("❌ word_kr ба word_mn заавал байх ёстой", "error");
+      return;
+    }
+    // Давхар шалгах
+    const existingWords = new Set(classVocabs.map(v => (v.word || "").trim().toLowerCase()));
+    const duplicates = valid.filter(r => existingWords.has(String(r.word_kr).trim().toLowerCase()));
+    let rowsToAdd = valid;
+    if (duplicates.length > 0) {
+      const dupList = duplicates.slice(0, 5).map(d => `• ${d.word_kr}`).join("\n");
+      const more = duplicates.length > 5 ? `\n...болон ${duplicates.length - 5} өөр` : "";
+      const choice = window.confirm(
+        `⚠️ ${duplicates.length} үг аль хэдийн байна:\n\n${dupList}${more}\n\n` +
+        `OK = Давхардсаныг алгасч, шинийг л нэмэх\nCancel = Болих`
+      );
+      if (!choice) return;
+      rowsToAdd = valid.filter(r => !existingWords.has(String(r.word_kr).trim().toLowerCase()));
+      if (rowsToAdd.length === 0) {
+        onToast && onToast("⚠️ Бүх үг давхардсан", "warning"); return;
+      }
+    }
+    setJsonSaving(true);
+    try {
+      const inserts = rowsToAdd.map((r, i) => ({
+        id: `v${Date.now()}${i}${Math.random().toString(36).slice(2, 5)}`,
+        class_id: cls.id,
+        word: String(r.word_kr).trim(),
+        meaning: String(r.word_mn).trim(),
+        example_kr: r.example_kr ? String(r.example_kr).trim() : null,
+        example_mn: r.example_mn ? String(r.example_mn).trim() : null,
+        search_keyword: r.search_keyword ? String(r.search_keyword).trim() : null,
+        type: vocabType, date: vocabDate,
+        category: vocabCategory.trim() || null,
+      }));
+      for (const item of inserts) await supaInsert("vocab_entries", item);
+      onToast && onToast(`✅ ${rowsToAdd.length} үг JSON-оор нэмэгдлээ!`, "success");
+      setJsonText("");
+      setShowJsonBulk(false);
+      refreshAll && refreshAll();
+    } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+    setJsonSaving(false);
+  };
   const sessions = getSessions(cls.days, attMonth);
   // Sort students by attendance %
   const sortedStudents = [...students].map(s => {
@@ -4752,6 +4829,7 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
             <div style={{ fontWeight: 800, fontSize: 14, color: "#b8860b" }}>📚 Үг/Дүрэм нэмэх</div>
             <div style={{ display: "flex", gap: 5 }}>
               <button onClick={() => setShowBulkPaste(true)} style={{ ...btn("#7c3aed", "#fff"), boxShadow: "0 2px 0 #5b21b6" }}>📋 Бөөнөөр</button>
+              <button onClick={() => setShowJsonBulk(true)} style={{ ...btn("#0891b2", "#fff"), boxShadow: "0 2px 0 #0e7490" }}>📦 JSON</button>
               <button onClick={() => setShowVocab(false)} style={btn("#fff", "#888", "#e0e0e0")}>✕</button>
             </div>
           </div>
@@ -5091,6 +5169,60 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
         <Overlay onClose={() => setShowVocabList(false)} maxW={520}>
           <VocabListView vocabEntries={classVocabs} t={{ accent: cls.color, text: "#1a1a2e", soft: cls.color + "22", card: "#fff", border: cls.color + "55" }}
             className={cls.name} weakWords={[]} />
+        </Overlay>
+      )}
+
+      {/* 📦 JSON BULK UPLOAD — жишээ өгүүлбэр + зургийн түлхүүртэй */}
+      {showJsonBulk && (
+        <Overlay onClose={() => setShowJsonBulk(false)} maxW={520}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22 }}>📦</span> JSON-оор бөөн нэмэх
+          </div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 10, lineHeight: 1.5, background: "#ecfeff", padding: 10, borderRadius: 10, border: "1px solid #a5f3fc" }}>
+            💡 JSON массив буулгана. Талбарууд: <b>word_kr</b> (солонгос), <b>word_mn</b> (монгол), <b>example_kr</b>, <b>example_mn</b> (жишээ), <b>search_keyword</b> (зургийн англи түлхүүр).
+            <br />word_kr, word_mn заавал. Бусад нь заавал биш.
+          </div>
+
+          {/* Огноо + төрөл + сэдэв */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <input type="date" value={vocabDate} onChange={e => setVocabDate(e.target.value)} style={{ ...INP, flex: 1, fontSize: 12 }} />
+            <select value={vocabType} onChange={e => setVocabType(e.target.value)} style={{ ...INP, width: 100, fontSize: 12, cursor: "pointer" }}>
+              <option value="vocab">📚 Үг</option>
+              <option value="grammar">📖 Дүрэм</option>
+            </select>
+          </div>
+          <input value={vocabCategory} onChange={e => setVocabCategory(e.target.value)}
+            placeholder="🏷️ Сэдэв (заавал биш)" style={{ ...INP, fontSize: 12, marginBottom: 8 }} />
+
+          <textarea value={jsonText} onChange={e => setJsonText(e.target.value)}
+            placeholder={`[\n  {\n    "word_kr": "사과",\n    "word_mn": "алим",\n    "example_kr": "사과를 먹어요.",\n    "example_mn": "Би алим иднэ.",\n    "search_keyword": "apple"\n  }\n]`}
+            style={{ ...INP, minHeight: 200, fontSize: 12, fontFamily: "monospace", lineHeight: 1.5, resize: "vertical" }} />
+
+          {/* Жишээ загвар хуулах товч */}
+          <button onClick={() => setJsonText(`[
+  {
+    "word_kr": "사과",
+    "word_mn": "алим",
+    "example_kr": "사과를 먹어요.",
+    "example_mn": "Би алим иднэ.",
+    "search_keyword": "apple"
+  },
+  {
+    "word_kr": "학교",
+    "word_mn": "сургууль",
+    "example_kr": "학교에 가요.",
+    "example_mn": "Сургууль явна.",
+    "search_keyword": "school"
+  }
+]`)}
+            style={{ ...btn("#fff", "#0891b2", "#a5f3fc"), fontSize: 11, marginTop: 6, marginBottom: 10 }}>
+            📋 Жишээ загвар оруулах
+          </button>
+
+          <button onClick={doJsonBulkAdd} disabled={jsonSaving || !jsonText.trim()}
+            style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", background: (jsonSaving || !jsonText.trim()) ? "#ccc" : "linear-gradient(135deg,#0891b2,#0e7490)", color: "#fff", fontWeight: 800, fontSize: 14, cursor: (jsonSaving || !jsonText.trim()) ? "default" : "pointer" }}>
+            {jsonSaving ? "⏳ Хадгалж байна..." : "📦 Бүгдийг нэмэх"}
+          </button>
         </Overlay>
       )}
 
