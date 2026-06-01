@@ -1269,6 +1269,7 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
   const [search, setSearch] = useState("");
   const [groupMode, setGroupMode] = useState("date"); // "date" | "category"
   const [cardWord, setCardWord] = useState(null); // дэлгэрэнгүй харах үг (Hippo Cards маяг)
+  const [expandedGroups, setExpandedGroups] = useState({}); // нээлттэй бүлгүүд {date: true}
 
   // Бүх категориуд байгаа эсэх
   const hasCategories = useMemo(() =>
@@ -1488,12 +1489,20 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {grouped.map(g => (
+          {grouped.map((g, gi) => {
+            // Хайлт хийж байгаа эсвэл гараар нээсэн бол нээлттэй. Анхдагч: эхний бүлэг нээлттэй
+            const isOpen = search.trim() ? true : (expandedGroups[g.date] !== undefined ? expandedGroups[g.date] : gi === 0);
+            return (
             <div key={g.date} style={{ background: "#fff", borderRadius: 12, padding: 10, border: `1px solid ${t.border}` }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: t.accent, marginBottom: 8, paddingBottom: 6, borderBottom: `1px solid ${t.soft}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>{g.isCategory ? g.date : `📅 ${g.date}`}</span>
-                <span style={{ fontSize: 10, color: t.text, opacity: .6, fontWeight: 600 }}>{g.items.length} зүйл</span>
+              <div onClick={() => setExpandedGroups(prev => ({ ...prev, [g.date]: !isOpen }))}
+                style={{ fontSize: 13, fontWeight: 800, color: t.accent, paddingBottom: isOpen ? 6 : 0, marginBottom: isOpen ? 8 : 0, borderBottom: isOpen ? `1px solid ${t.soft}` : "none", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                <span>{g.isCategory ? `🏷️ ${g.date}` : `📅 ${g.date}`}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 10, color: t.text, opacity: .6, fontWeight: 600, background: t.soft, padding: "2px 8px", borderRadius: 8 }}>{g.items.length} үг</span>
+                  <span style={{ fontSize: 14, transform: isOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.2s", display: "inline-block" }}>▸</span>
+                </span>
               </div>
+              {isOpen && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {g.items.map((v, idx) => {
                   const status = wordStatus(v.word);
@@ -1534,8 +1543,10 @@ function VocabListView({ vocabEntries, t, className, onClose, weakWords = [] }) 
                   );
                 })}
               </div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -4231,6 +4242,45 @@ function CardContent({ s, t, isAdmin, isSuperAdmin, upd, attMonth, setAttMonth, 
         </div>
       </div>
 
+      {/* 🎓 Сурлагын зорилго — сурагч өөрөө бөглөнө, багш/админ харна */}
+      {(s.school || s.grade || s.dream_major || s.dream_university) ? (
+        <div style={{ background: "linear-gradient(160deg, #fff, #f0f7ff)", borderRadius: 14, padding: 12, marginBottom: 10, border: "2px solid #bbdefb" }}>
+          <div style={{ fontWeight: 800, fontSize: 13, color: "#1565c0", marginBottom: 8 }}>🎓 Сурлагын зорилго</div>
+          <div style={{ display: "grid", gap: 6, fontSize: 12, color: "#333" }}>
+            {s.school && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>🏫 Сургууль:</span>
+                <span style={{ fontWeight: 700 }}>{s.school}</span>
+              </div>
+            )}
+            {s.grade && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>📚 Анги:</span>
+                <span style={{ fontWeight: 700 }}>{s.grade}</span>
+              </div>
+            )}
+            {s.dream_major && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>🎯 Мэргэжил:</span>
+                <span style={{ fontWeight: 700 }}>{s.dream_major}</span>
+              </div>
+            )}
+            {s.dream_university && (
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ opacity: .6 }}>🎓 Их сургууль:</span>
+                <span style={{ fontWeight: 700 }}>{s.dream_university}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: "#fafafa", borderRadius: 14, padding: 12, marginBottom: 10, border: "2px dashed #ddd", textAlign: "center" }}>
+          <div style={{ fontSize: 12, color: "#999", fontStyle: "italic" }}>
+            🎓 Сурагч сурлагын зорилгоо хараахан бөглөөгүй байна
+          </div>
+        </div>
+      )}
+
       {/* Payment info — бүх хэрэглэгчид харуулна */}
       {((s.total_fee || 0) > 0 || s.next_due) && (
         <div style={{ background: t.card, borderRadius: 14, padding: 12, marginBottom: 10, border: `2px solid ${t.border}` }}>
@@ -4814,7 +4864,10 @@ function ClassDetail({ cls, isAdmin, isSuperAdmin, students, setStudents, setCla
             style={{ ...btn(activeExam ? "#43a047" : "#ff9800", "#fff"), boxShadow: activeExam ? "0 3px 0 #2e7d32" : "0 3px 0 #ef6c00" }}>
             🏆 {activeExam ? "Идэвхтэй" : "Шалгалт"}
           </button>
-          <button onClick={() => setShowVocab(v => !v)} style={btn("#fff3cd", "#b8860b", "#f9a825")}>{showVocab ? "✕" : "📚"}</button>
+          <button onClick={() => setShowVocab(v => !v)}
+            style={{ ...btn(showVocab ? "#fff" : "#ffc107", showVocab ? "#b8860b" : "#fff", "#f9a825"), fontWeight: 800, boxShadow: showVocab ? "none" : "0 3px 0 #f9a825" }}>
+            {showVocab ? "✕ Хаах" : "➕ Үг нэмэх"}
+          </button>
           <button onClick={() => setShowVocabList(true)} style={btn("#e1f5fe", "#0288d1", "#81d4fa")}>📋 Жагсаалт</button>
           <button onClick={() => setShowAddSt(true)} style={btn(cls.color, "#fff")}>+ Сурагч</button>
           {isAdmin && <button onClick={() => setShowEditCls(true)} style={btn("#f0f4ff", "#1976d2", "#90caf9")}>⚙️</button>}
@@ -5347,6 +5400,9 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
   const [showChangePw, setShowChangePw] = useState(false);
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [profileForm, setProfileForm] = useState({ school: "", grade: "", dream_major: "", dream_university: "" });
+  const [profileSaving, setProfileSaving] = useState(false);
   const [photoUrl, setPhotoUrl] = useState(s.photo_url || "");
   const [photoSaving, setPhotoSaving] = useState(false);
   const [editNotes, setEditNotes] = useState(false);
@@ -5508,6 +5564,7 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
         }} style={btn("#fff", t.text, t.border)}>← Гарах</button>
         <div style={{ fontWeight: 800, fontSize: 14, color: t.accent }}>🌸 Кандун</div>
         <div style={{ display: "flex", gap: 5 }}>
+          <button onClick={() => { setProfileForm({ school: s.school || "", grade: s.grade || "", dream_major: s.dream_major || "", dream_university: s.dream_university || "" }); setShowProfile(true); }} style={btn(t.soft, t.accent)} title="Миний мэдээлэл">👤</button>
           <button onClick={() => { setPhotoUrl(s.photo_url || ""); setShowPhotoUpload(true); }} style={btn(t.soft, t.accent)} title="Профайл зураг">📷</button>
           <button onClick={() => setShowThemePicker(true)} style={btn(t.soft, t.accent)} title="Theme солих">🎨</button>
           <button onClick={() => setShowChangePw(true)} style={btn(t.soft, t.accent)} title="Нууц үг солих">🔑</button>
@@ -5920,6 +5977,60 @@ function StudentView({ s, setStudents, goBack, attMonth, setAttMonth, classDays,
               </button>
             )}
           </div>
+        </Overlay>
+      )}
+
+      {/* 👤 МИНИЙ МЭДЭЭЛЭЛ — сургууль, анги, мөрөөдлийн мэргэжил */}
+      {showProfile && (
+        <Overlay onClose={() => setShowProfile(false)} maxW={420}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 24 }}>👤</span> Миний мэдээлэл
+          </div>
+          <div style={{ fontSize: 12, color: "#666", marginBottom: 14, lineHeight: 1.5, background: t.soft, padding: 10, borderRadius: 10 }}>
+            💡 Энэ мэдээллийг бөглөвөл багш танай зорилгыг ойлгож илүү сайн туслана.
+          </div>
+
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>🏫 Сургууль</div>
+            <input value={profileForm.school} onChange={e => setProfileForm({ ...profileForm, school: e.target.value })}
+              placeholder="Жишээ: 1-р сургууль" style={INP} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>📚 Анги бүлэг</div>
+            <input value={profileForm.grade} onChange={e => setProfileForm({ ...profileForm, grade: e.target.value })}
+              placeholder="Жишээ: 11-р анги, А бүлэг" style={INP} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>🎯 Мөрөөдлийн мэргэжил</div>
+            <input value={profileForm.dream_major} onChange={e => setProfileForm({ ...profileForm, dream_major: e.target.value })}
+              placeholder="Жишээ: Эмч, Программист" style={INP} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: t.accent, fontWeight: 700, marginBottom: 5 }}>🎓 Сурахыг хүсэж буй их сургууль</div>
+            <input value={profileForm.dream_university} onChange={e => setProfileForm({ ...profileForm, dream_university: e.target.value })}
+              placeholder="Жишээ: Сөүлийн их сургууль" style={INP} />
+          </div>
+
+          <button onClick={async () => {
+            setProfileSaving(true);
+            try {
+              const updates = {
+                school: profileForm.school.trim() || null,
+                grade: profileForm.grade.trim() || null,
+                dream_major: profileForm.dream_major.trim() || null,
+                dream_university: profileForm.dream_university.trim() || null,
+              };
+              await supaUpdate("students", s.id, updates);
+              setStudents(prev => prev.map(x => x.id === s.id ? { ...x, ...updates } : x));
+              onToast && onToast("✅ Мэдээлэл хадгалагдлаа", "success");
+              setShowProfile(false);
+              refreshAll && refreshAll();
+            } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+            setProfileSaving(false);
+          }} disabled={profileSaving}
+            style={{ width: "100%", padding: 14, borderRadius: 14, border: "none", background: `linear-gradient(135deg,${t.accent},${t.accent}dd)`, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer", boxShadow: `0 4px 0 ${t.border}`, opacity: profileSaving ? .5 : 1 }}>
+            {profileSaving ? "⏳ Хадгалж байна..." : "💾 Хадгалах"}
+          </button>
         </Overlay>
       )}
 
