@@ -2522,15 +2522,28 @@ function CreateExamModal({ cls, vocabEntries, teacherId, onClose, onCreated, onT
   const [title, setTitle] = useState(`Шалгалт ${new Date().toLocaleDateString("mn-MN")}`);
   const [questionCount, setQuestionCount] = useState(10);
   const [duration, setDuration] = useState(10);
+  const [scopeMode, setScopeMode] = useState("date"); // "date" | "category"
   const [selectedDates, setSelectedDates] = useState([TODAY]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
   const [creating, setCreating] = useState(false);
 
   const availableDates = useMemo(() => {
     return [...new Set(vocabEntries.filter(v => v.date).map(v => v.date))].sort().reverse();
   }, [vocabEntries]);
 
+  const availableCategories = useMemo(() => {
+    return [...new Set(vocabEntries.filter(v => v.category && v.category.trim()).map(v => v.category.trim()))].sort();
+  }, [vocabEntries]);
+
+  const hasCategories = availableCategories.length > 0;
+
   const toggleDate = (d) => setSelectedDates(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
-  const scopedVocabs = vocabEntries.filter(v => selectedDates.includes(v.date));
+  const toggleCategory = (cat) => setSelectedCategories(prev => prev.includes(cat) ? prev.filter(x => x !== cat) : [...prev, cat]);
+
+  // Сонгосон хамрах хүрээгээр үгсийг шүүх
+  const scopedVocabs = scopeMode === "category"
+    ? vocabEntries.filter(v => v.category && selectedCategories.includes(v.category.trim()))
+    : vocabEntries.filter(v => selectedDates.includes(v.date));
 
   const submit = async () => {
     if (scopedVocabs.length < 3) { onToast && onToast("❌ Дор хаяж 3 үг сонгоно уу", "error"); return; }
@@ -2541,7 +2554,11 @@ function CreateExamModal({ cls, vocabEntries, teacherId, onClose, onCreated, onT
         class_id: cls.id, teacher_id: teacherId,
         title: title.trim() || "Шалгалт",
         question_count: questionCount, duration_minutes: duration,
-        status: "pending", vocab_scope_dates: selectedDates, xp_per_correct: 5,
+        status: "pending",
+        scope_mode: scopeMode,
+        vocab_scope_dates: scopeMode === "date" ? selectedDates : [],
+        vocab_scope_categories: scopeMode === "category" ? selectedCategories : [],
+        xp_per_correct: 5,
       };
       await supaInsert("exams", exam);
       onCreated && onCreated(exam);
@@ -2567,23 +2584,62 @@ function CreateExamModal({ cls, vocabEntries, teacherId, onClose, onCreated, onT
       </div>
 
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>📅 ҮГИЙН ХАМРАХ ӨДРҮҮД</div>
-        {availableDates.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: 14 }}>Үг байхгүй</div>
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 120, overflowY: "auto", padding: 6, background: "#fafafa", borderRadius: 10 }}>
-            {availableDates.map(d => {
-              const isSel = selectedDates.includes(d);
-              const cnt = vocabEntries.filter(v => v.date === d).length;
-              return (
-                <button key={d} onClick={() => toggleDate(d)} style={{
-                  background: isSel ? "#7c3aed" : "#fff", color: isSel ? "#fff" : "#555",
-                  border: isSel ? "2px solid #7c3aed" : "2px solid #e0e0e0",
-                  borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
-                }}>{d.slice(5)} ({cnt})</button>
-              );
-            })}
+        {/* Горим солих — өдөр/сэдэв (сэдэв байгаа үед) */}
+        {hasCategories && (
+          <div style={{ display: "flex", gap: 5, marginBottom: 8, background: "#f5f0ff", borderRadius: 10, padding: 3 }}>
+            <button onClick={() => setScopeMode("date")} style={{
+              flex: 1, padding: "6px 4px", borderRadius: 8, border: "none",
+              background: scopeMode === "date" ? "#fff" : "transparent",
+              color: scopeMode === "date" ? "#7c3aed" : "#999",
+              fontWeight: scopeMode === "date" ? 800 : 600, fontSize: 11, cursor: "pointer",
+            }}>📅 Өдрөөр</button>
+            <button onClick={() => setScopeMode("category")} style={{
+              flex: 1, padding: "6px 4px", borderRadius: 8, border: "none",
+              background: scopeMode === "category" ? "#fff" : "transparent",
+              color: scopeMode === "category" ? "#7c3aed" : "#999",
+              fontWeight: scopeMode === "category" ? 800 : 600, fontSize: 11, cursor: "pointer",
+            }}>🏷️ Сэдвээр</button>
           </div>
+        )}
+
+        {scopeMode === "date" ? (
+          <>
+            <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>📅 ҮГИЙН ХАМРАХ ӨДРҮҮД (олныг сонгож болно)</div>
+            {availableDates.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: 14 }}>Үг байхгүй</div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 120, overflowY: "auto", padding: 6, background: "#fafafa", borderRadius: 10 }}>
+                {availableDates.map(d => {
+                  const isSel = selectedDates.includes(d);
+                  const cnt = vocabEntries.filter(v => v.date === d).length;
+                  return (
+                    <button key={d} onClick={() => toggleDate(d)} style={{
+                      background: isSel ? "#7c3aed" : "#fff", color: isSel ? "#fff" : "#555",
+                      border: isSel ? "2px solid #7c3aed" : "2px solid #e0e0e0",
+                      borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                    }}>{isSel ? "✓ " : ""}{d.slice(5)} ({cnt})</button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>🏷️ ҮГИЙН ХАМРАХ СЭДВҮҮД (олныг сонгож болно)</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, maxHeight: 120, overflowY: "auto", padding: 6, background: "#fafafa", borderRadius: 10 }}>
+              {availableCategories.map(cat => {
+                const isSel = selectedCategories.includes(cat);
+                const cnt = vocabEntries.filter(v => (v.category || "").trim() === cat).length;
+                return (
+                  <button key={cat} onClick={() => toggleCategory(cat)} style={{
+                    background: isSel ? "#7c3aed" : "#fff", color: isSel ? "#fff" : "#555",
+                    border: isSel ? "2px solid #7c3aed" : "2px solid #e0e0e0",
+                    borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  }}>{isSel ? "✓ " : ""}{cat} ({cnt})</button>
+                );
+              })}
+            </div>
+          </>
         )}
         <div style={{ marginTop: 6, fontSize: 11, color: scopedVocabs.length >= 3 ? "#43a047" : "#c62828", fontWeight: 700 }}>
           {scopedVocabs.length >= 3 ? `✓ ${scopedVocabs.length} үг сонгогдсон` : `⚠️ Дор хаяж 3 хэрэгтэй (${scopedVocabs.length})`}
@@ -2896,11 +2952,20 @@ function StudentExamScreen({ exam, vocabEntries, student, t, onComplete, onClose
   const [submitting, setSubmitting] = useState(false);
 
   const examVocabs = useMemo(() => {
+    // Шалгалт сэдвээр эсвэл өдрөөр хамрах хүрээтэй байж болно
+    if (exam.scope_mode === "category" && (exam.vocab_scope_categories || []).length > 0) {
+      const cats = exam.vocab_scope_categories;
+      return vocabEntries.filter(v => v.category && cats.includes(v.category.trim()));
+    }
     const dates = exam.vocab_scope_dates || [];
     return vocabEntries.filter(v => dates.includes(v.date));
   }, [exam, vocabEntries]);
 
   const recentVocabs = useMemo(() => {
+    if (exam.scope_mode === "category" && (exam.vocab_scope_categories || []).length > 0) {
+      const cats = exam.vocab_scope_categories;
+      return vocabEntries.filter(v => !(v.category && cats.includes(v.category.trim()))).slice(0, 12);
+    }
     const dates = exam.vocab_scope_dates || [];
     return vocabEntries.filter(v => v.date && !dates.includes(v.date)).slice(0, 12);
   }, [exam, vocabEntries]);
@@ -4509,6 +4574,11 @@ function CopyVocabsModal({ sourceClass, vocabsToCopy, allClasses, onClose, onCop
         id: `v${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
         class_id: targetClassId,
         word: v.word, meaning: v.meaning, type: v.type || "vocab", date: targetDate,
+        category: v.category || null,
+        example_kr: v.example_kr || null,
+        example_mn: v.example_mn || null,
+        search_keyword: v.search_keyword || null,
+        image_url: v.image_url || null,
       }));
       await Promise.all(inserts.map(item => supaInsert("vocab_entries", item)));
       const targetCls = otherClasses.find(c => c.id === targetClassId);
