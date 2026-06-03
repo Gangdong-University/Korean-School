@@ -6252,11 +6252,23 @@ function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast, 
   const [showCatEdit, setShowCatEdit] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [catSaving, setCatSaving] = useState(false);
+  const [filterCat, setFilterCat] = useState("all"); // сэдвээр шүүх
+
+  // Сонгосон ангийн боломжит сэдвүүд
+  const classCategories = useMemo(() => {
+    const pool = selClsId === "all" ? vocabEntries : vocabEntries.filter(v => v.class_id === selClsId);
+    return [...new Set(pool.map(v => v.category).filter(Boolean))].sort();
+  }, [vocabEntries, selClsId]);
 
   const filtered = useMemo(() => {
-    if (selClsId === "all") return vocabEntries;
-    return vocabEntries.filter(v => v.class_id === selClsId);
-  }, [vocabEntries, selClsId]);
+    let pool = selClsId === "all" ? vocabEntries : vocabEntries.filter(v => v.class_id === selClsId);
+    // Сэдвээр шүүх
+    if (filterCat !== "all") {
+      if (filterCat === "__none__") pool = pool.filter(v => !v.category);
+      else pool = pool.filter(v => (v.category || "").trim() === filterCat);
+    }
+    return pool;
+  }, [vocabEntries, selClsId, filterCat]);
 
   // Group by date
   const grouped = useMemo(() => {
@@ -6270,7 +6282,7 @@ function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast, 
   }, [filtered]);
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === filtered.length) setSelectedIds(new Set());
+    if (selectedIds.size === filtered.length && filtered.length > 0) setSelectedIds(new Set());
     else setSelectedIds(new Set(filtered.map(v => v.id)));
   };
 
@@ -6284,6 +6296,11 @@ function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast, 
         id: `v${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
         class_id: copyTargetCls, word: v.word, meaning: v.meaning,
         type: v.type || "vocab", date: copyTargetDate,
+        category: v.category || null,
+        example_kr: v.example_kr || null,
+        example_mn: v.example_mn || null,
+        search_keyword: v.search_keyword || null,
+        image_url: v.image_url || null,
       }));
       await Promise.all(inserts.map(item => supaInsert("vocab_entries", item)));
       const cls = classes.find(c => c.id === copyTargetCls);
@@ -6339,8 +6356,8 @@ td.type { width: 60px; text-align: center; font-size: 11px }
       </div>
 
       {/* Анги сонгох */}
-      <div style={{ marginBottom: 10 }}>
-        <select value={selClsId} onChange={e => { setSelClsId(e.target.value); setSelectedIds(new Set()); }}
+      <div style={{ marginBottom: 8 }}>
+        <select value={selClsId} onChange={e => { setSelClsId(e.target.value); setSelectedIds(new Set()); setFilterCat("all"); }}
           style={{ ...INP, cursor: "pointer", fontWeight: 600 }}>
           <option value="all">🏫 Бүх анги ({vocabEntries.length})</option>
           {classes.map(c => {
@@ -6349,6 +6366,27 @@ td.type { width: 60px; text-align: center; font-size: 11px }
           })}
         </select>
       </div>
+
+      {/* Сэдвээр шүүх (сэдэв байгаа үед) */}
+      {classCategories.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <select value={filterCat} onChange={e => { setFilterCat(e.target.value); setSelectedIds(new Set()); }}
+            style={{ ...INP, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+            <option value="all">🏷️ Бүх сэдэв</option>
+            {classCategories.map(cat => {
+              const pool = selClsId === "all" ? vocabEntries : vocabEntries.filter(v => v.class_id === selClsId);
+              const cnt = pool.filter(v => (v.category || "").trim() === cat).length;
+              return <option key={cat} value={cat}>🏷️ {cat} ({cnt})</option>;
+            })}
+            <option value="__none__">🏷️ Сэдэвгүй үгс</option>
+          </select>
+          {filterCat !== "all" && filterCat !== "__none__" && (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#7c3aed", fontWeight: 600, background: "#f3e5f5", padding: "6px 10px", borderRadius: 8 }}>
+              💡 "{filterCat}" сэдвийн үгсийг сонгоод 📋 Хуулах дарвал сэдэвтэй нь хамт нөгөө анги руу шилжинэ
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 👑 Админд: сэдвийн статистик (хэдэн үг ямар сэдэвт) */}
       {isSuperAdmin && (() => {
