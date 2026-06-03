@@ -6249,6 +6249,9 @@ function AllVocabsManager({ classes, vocabEntries, onClose, onChanged, onToast, 
   const [copyTargetCls, setCopyTargetCls] = useState("");
   const [copyTargetDate, setCopyTargetDate] = useState(TODAY);
   const [copying, setCopying] = useState(false);
+  const [showCatEdit, setShowCatEdit] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+  const [catSaving, setCatSaving] = useState(false);
 
   const filtered = useMemo(() => {
     if (selClsId === "all") return vocabEntries;
@@ -6387,6 +6390,10 @@ td.type { width: 60px; text-align: center; font-size: 11px }
                 style={{ ...btn("#1976d2", "#fff"), boxShadow: "0 3px 0 #0d47a1" }}>
                 📋 Хуулах
               </button>
+              <button onClick={() => setShowCatEdit(true)} className="k-pop"
+                style={{ ...btn("#7c3aed", "#fff"), boxShadow: "0 3px 0 #5b21b6" }}>
+                🏷️ Сэдэв
+              </button>
               <button onClick={async () => {
                 if (!window.confirm(`${selectedIds.size} үгийг устгахдаа итгэлтэй байна уу?\n\nЭнэ үйлдлийг буцаах боломжгүй!`)) return;
                 try {
@@ -6460,6 +6467,52 @@ td.type { width: 60px; text-align: center; font-size: 11px }
       </div>
 
       {/* Хуулах modal */}
+      {/* 🏷️ СЭДЭВ ЗАСАХ — сонгосон үгсэд сэдэв оноох */}
+      {showCatEdit && (
+        <Overlay onClose={() => setShowCatEdit(false)} maxW={380}>
+          <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12 }}>🏷️ Сэдэв оноох</div>
+          <div style={{ background: "#f3e5f5", borderRadius: 10, padding: 10, marginBottom: 12, fontSize: 12, color: "#7c3aed", fontWeight: 700 }}>
+            {selectedIds.size} үг сонгогдсон — эдгээрт сэдэв оноогдоно
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700, marginBottom: 5 }}>🏷️ СЭДВИЙН НЭР</div>
+            <input value={newCategory} onChange={e => setNewCategory(e.target.value)}
+              placeholder="Жишээ: Хоол, Жимс, Гэр бүл..."
+              list="catedit-list" style={INP} />
+            <datalist id="catedit-list">
+              {[...new Set(vocabEntries.map(v => v.category).filter(Boolean))].map(cat => (
+                <option key={cat} value={cat} />
+              ))}
+            </datalist>
+            <div style={{ fontSize: 10, color: "#999", marginTop: 4 }}>
+              💡 Хоосон үлдээвэл сэдэв арилна
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setShowCatEdit(false)} style={{ ...btn("#fff", "#888", "#e0e0e0"), flex: 1, justifyContent: "center" }}>
+              Болих
+            </button>
+            <button onClick={async () => {
+              setCatSaving(true);
+              try {
+                const ids = [...selectedIds];
+                const catVal = newCategory.trim() || null;
+                for (const id of ids) await supaUpdate("vocab_entries", id, { category: catVal });
+                setSelectedIds(new Set());
+                setNewCategory("");
+                onToast && onToast(`✅ ${ids.length} үгэнд сэдэв оноогдлоо`, "success");
+                setShowCatEdit(false);
+                onChanged && onChanged();
+              } catch (e) { onToast && onToast("❌ " + e.message, "error"); }
+              setCatSaving(false);
+            }} disabled={catSaving}
+              style={{ ...btn("#7c3aed", "#fff"), flex: 2, justifyContent: "center", boxShadow: "0 3px 0 #5b21b6", opacity: catSaving ? .5 : 1 }}>
+              {catSaving ? "⏳..." : "🏷️ Сэдэв оноох"}
+            </button>
+          </div>
+        </Overlay>
+      )}
+
       {showCopyTo && (
         <Overlay onClose={() => setShowCopyTo(false)} maxW={380}>
           <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 12 }}>📋 Үгсийг хуулах</div>
